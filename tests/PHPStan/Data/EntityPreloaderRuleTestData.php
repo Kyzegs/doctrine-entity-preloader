@@ -13,6 +13,7 @@ use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\Contributor;
 use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\PasswordVerifier;
 use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\Tag;
 use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\User;
+use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Issue37\Employee;
 use function PHPStan\Testing\assertType;
 
 final class EntityPreloaderRuleTestData
@@ -112,6 +113,20 @@ final class EntityPreloaderRuleTestData
     public function preloadWithObject(array $entities): void
     {
         assertType('list<object>', $this->entityPreloader->preload($entities, 'foo')); // error: Property 'object::$foo' not found.
+    }
+
+    /**
+     * @see https://github.com/shipmonk-rnd/doctrine-entity-preloader/issues/37
+     */
+    public function preloadWithoutExplicitTargetEntity(): void
+    {
+        $employees = $this->entityManager->getRepository(Employee::class)->findAll();
+
+        // ManyToOne WITHOUT targetEntity attribute
+        assertType('list<ShipMonkTests\DoctrineEntityPreloader\Fixtures\Issue37\Employee>', $this->entityPreloader->preload($employees, 'supervisor'));
+
+        // OneToOne WITHOUT targetEntity attribute
+        assertType('list<ShipMonkTests\DoctrineEntityPreloader\Fixtures\Issue37\EmployeeSettings>', $this->entityPreloader->preload($employees, 'settings'));
     }
 
 }

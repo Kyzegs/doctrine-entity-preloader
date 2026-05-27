@@ -1,13 +1,13 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader\Fixtures\Synthetic\ClassTableInheritance;
+namespace KyzegsTests\DoctrineEntityPreloader\Fixtures\Synthetic\ClassTableInheritance;
 
 use Doctrine\ORM\Mapping\DiscriminatorMap;
 use Doctrine\ORM\Mapping\Entity;
 use Doctrine\ORM\Mapping\InheritanceType;
 use Doctrine\ORM\Mapping\JoinColumn;
 use Doctrine\ORM\Mapping\ManyToOne;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Synthetic\TestEntityWithId;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Synthetic\TestEntityWithId;
 
 #[Entity]
 #[InheritanceType('JOINED')]

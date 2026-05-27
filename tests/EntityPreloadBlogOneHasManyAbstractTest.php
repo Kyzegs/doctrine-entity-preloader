@@ -1,13 +1,13 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader;
+namespace KyzegsTests\DoctrineEntityPreloader;
 
 use Doctrine\DBAL\Types\Type as DbalType;
 use Doctrine\ORM\Mapping\ClassMetadata;
 use PHPUnit\Framework\Attributes\DataProvider;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\Article;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\Comment;
-use ShipMonkTests\DoctrineEntityPreloader\Lib\TestCase;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Article;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Comment;
+use KyzegsTests\DoctrineEntityPreloader\Lib\TestCase;
 
 class EntityPreloadBlogOneHasManyAbstractTest extends TestCase
 {

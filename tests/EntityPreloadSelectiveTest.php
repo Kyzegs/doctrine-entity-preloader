@@ -1,22 +1,22 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader;
+namespace KyzegsTests\DoctrineEntityPreloader;
 
 use Doctrine\Common\Collections\Criteria;
 use Doctrine\DBAL\Types\Type as DbalType;
 use Doctrine\ORM\PersistentCollection;
 use PHPUnit\Framework\Attributes\DataProvider;
-use ShipMonk\DoctrineEntityPreloader\Exception\DirtyCollectionException;
-use ShipMonk\DoctrineEntityPreloader\Exception\InvalidAssociationException;
-use ShipMonk\DoctrineEntityPreloader\Exception\UnsafePartialCollectionException;
-use ShipMonk\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
-use ShipMonk\DoctrineEntityPreloader\Preload;
-use ShipMonk\DoctrineEntityPreloader\PreloadQueryBuilder;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\Article;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\Category;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\Comment;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\Tag;
-use ShipMonkTests\DoctrineEntityPreloader\Lib\TestCase;
+use Kyzegs\DoctrineEntityPreloader\Exception\DirtyCollectionException;
+use Kyzegs\DoctrineEntityPreloader\Exception\InvalidAssociationException;
+use Kyzegs\DoctrineEntityPreloader\Exception\UnsafePartialCollectionException;
+use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
+use Kyzegs\DoctrineEntityPreloader\Preload;
+use Kyzegs\DoctrineEntityPreloader\PreloadQueryBuilder;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Article;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Category;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Comment;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Tag;
+use KyzegsTests\DoctrineEntityPreloader\Lib\TestCase;
 use function count;
 use function iterator_to_array;
 
@@ -212,7 +212,7 @@ class EntityPreloadSelectiveTest extends TestCase
 
         self::assertException(
             DirtyCollectionException::class,
-            "Association 'ShipMonkTests\\DoctrineEntityPreloader\\Fixtures\\Blog\\Category::articles' is dirty and cannot be selectively preloaded.",
+            "Association 'KyzegsTests\\DoctrineEntityPreloader\\Fixtures\\Blog\\Category::articles' is dirty and cannot be selectively preloaded.",
             function () use ($category): void {
                 $this->getEntityPreloader()->preload([$category], [
                     'articles' => Preload::criteria(
@@ -237,7 +237,7 @@ class EntityPreloadSelectiveTest extends TestCase
 
         self::assertException(
             UnsafePartialCollectionException::class,
-            "Association 'ShipMonkTests\\DoctrineEntityPreloader\\Fixtures\\Blog\\Category::articles' is already initialized. Use replaceInitializedCollection() to allow selective overwrite.",
+            "Association 'KyzegsTests\\DoctrineEntityPreloader\\Fixtures\\Blog\\Category::articles' is already initialized. Use replaceInitializedCollection() to allow selective overwrite.",
             function () use ($category): void {
                 $this->getEntityPreloader()->preload([$category], [
                     'articles' => Preload::criteria(

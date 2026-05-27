@@ -1,6 +1,6 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonk\DoctrineEntityPreloader\PHPStan;
+namespace Kyzegs\DoctrineEntityPreloader\PHPStan;
 
 use PhpParser\Node;
 use PhpParser\Node\Expr\MethodCall;
@@ -9,7 +9,7 @@ use PHPStan\Analyser\Scope;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
 use PHPStan\Type\ObjectType;
-use ShipMonk\DoctrineEntityPreloader\EntityPreloader;
+use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
 
 /**
  * @implements Rule<MethodCall>
@@ -48,7 +48,7 @@ final class EntityPreloaderRule extends EntityPreloaderCore implements Rule
         if ($propertyName === null) {
             return [
                 RuleErrorBuilder::message('Second argument to function EntityPreloader::preload() must be constant string')
-                    ->identifier('shipmonk.entityPreloader.nonConstantPropertyName')
+                    ->identifier('kyzegs.entityPreloader.nonConstantPropertyName')
                     ->build(),
             ];
         }
@@ -59,7 +59,7 @@ final class EntityPreloaderRule extends EntityPreloaderCore implements Rule
         } catch (EntityPreloaderRuleException $e) {
             return [
                 RuleErrorBuilder::message($e->getMessage())
-                    ->identifier('shipmonk.entityPreloader')
+                    ->identifier('kyzegs.entityPreloader')
                     ->build(),
             ];
         }

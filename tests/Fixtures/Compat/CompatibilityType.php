@@ -1,6 +1,6 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader\Fixtures\Compat;
+namespace KyzegsTests\DoctrineEntityPreloader\Fixtures\Compat;
 
 use Doctrine\DBAL\ParameterType;
 use function enum_exists;

@@ -1,6 +1,6 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog;
+namespace KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog;
 
 use Doctrine\ORM\Mapping\Column;
 use Doctrine\ORM\Mapping\Id;

@@ -1,2 +1,2 @@
 rules:
-    - ShipMonk\DoctrineEntityPreloader\PHPStan\EntityPreloaderRule
+    - Kyzegs\DoctrineEntityPreloader\PHPStan\EntityPreloaderRule

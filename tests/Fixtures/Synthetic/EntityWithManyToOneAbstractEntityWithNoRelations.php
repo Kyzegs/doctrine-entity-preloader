@@ -1,6 +1,6 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader\Fixtures\Synthetic;
+namespace KyzegsTests\DoctrineEntityPreloader\Fixtures\Synthetic;
 
 use Doctrine\ORM\Mapping\Entity;
 use Doctrine\ORM\Mapping\JoinColumn;

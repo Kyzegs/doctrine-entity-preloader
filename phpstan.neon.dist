@@ -27,7 +27,7 @@ parameters:
             tooWideThrowType: true
         implicitThrows: false
         checkedExceptionClasses:
-            - ShipMonk\DoctrineEntityPreloader\Exception\RuntimeException
+            - Kyzegs\DoctrineEntityPreloader\Exception\RuntimeException
 
     ignoreErrors:
         -

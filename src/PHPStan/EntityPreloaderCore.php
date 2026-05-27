@@ -1,6 +1,6 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonk\DoctrineEntityPreloader\PHPStan;
+namespace Kyzegs\DoctrineEntityPreloader\PHPStan;
 
 use Doctrine\ORM\Mapping\ManyToMany;
 use Doctrine\ORM\Mapping\ManyToOne;

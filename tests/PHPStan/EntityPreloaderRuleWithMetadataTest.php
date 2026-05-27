@@ -1,10 +1,10 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader\PHPStan;
+namespace KyzegsTests\DoctrineEntityPreloader\PHPStan;
 
 use PHPStan\Rules\Rule;
 use PHPStan\Type\Doctrine\ObjectMetadataResolver;
-use ShipMonk\DoctrineEntityPreloader\PHPStan\EntityPreloaderRule;
+use Kyzegs\DoctrineEntityPreloader\PHPStan\EntityPreloaderRule;
 use ShipMonk\PHPStanDev\RuleTestCase;
 
 /**

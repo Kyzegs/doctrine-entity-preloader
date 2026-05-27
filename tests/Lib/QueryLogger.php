@@ -1,6 +1,6 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader\Lib;
+namespace KyzegsTests\DoctrineEntityPreloader\Lib;
 
 use Nette\Utils\Strings;
 use Psr\Log\AbstractLogger;

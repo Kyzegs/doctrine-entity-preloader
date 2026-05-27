@@ -1,6 +1,6 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonk\DoctrineEntityPreloader;
+namespace Kyzegs\DoctrineEntityPreloader;
 
 use Doctrine\Common\Collections\Criteria;
 

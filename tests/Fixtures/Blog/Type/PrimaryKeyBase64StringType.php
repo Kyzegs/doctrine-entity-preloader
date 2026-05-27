@@ -1,13 +1,13 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\Type;
+namespace KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Type;
 
 use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Types\Type;
 use LogicException;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\PrimaryKey;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Compat\CompatibilityType;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\PrimaryKey;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Compat\CompatibilityType;
 use function base64_decode;
 use function base64_encode;
 use function get_debug_type;

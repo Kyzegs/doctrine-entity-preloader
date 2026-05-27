@@ -1,12 +1,12 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader;
+namespace KyzegsTests\DoctrineEntityPreloader;
 
 use Doctrine\DBAL\Types\Type as DbalType;
 use Doctrine\ORM\Mapping\ClassMetadata;
 use PHPUnit\Framework\Attributes\DataProvider;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Blog\Tag;
-use ShipMonkTests\DoctrineEntityPreloader\Lib\TestCase;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Tag;
+use KyzegsTests\DoctrineEntityPreloader\Lib\TestCase;
 
 class EntityPreloadBlogManyHasManyInversedTest extends TestCase
 {

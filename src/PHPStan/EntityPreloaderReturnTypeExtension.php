@@ -1,6 +1,6 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonk\DoctrineEntityPreloader\PHPStan;
+namespace Kyzegs\DoctrineEntityPreloader\PHPStan;
 
 use PhpParser\Node\Expr\MethodCall;
 use PHPStan\Analyser\Scope;
@@ -8,7 +8,7 @@ use PHPStan\Reflection\MethodReflection;
 use PHPStan\Type\DynamicMethodReturnTypeExtension;
 use PHPStan\Type\ObjectType;
 use PHPStan\Type\Type;
-use ShipMonk\DoctrineEntityPreloader\EntityPreloader;
+use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
 
 final class EntityPreloaderReturnTypeExtension extends EntityPreloaderCore implements DynamicMethodReturnTypeExtension
 {

@@ -1,5 +1,5 @@
 {
-    "name": "shipmonk/doctrine-entity-preloader",
+    "name": "kyzegs/doctrine-entity-preloader",
     "description": "Efficient & easy to use solution to n+1 problem in Doctrine ORM",
     "license": [
         "MIT"
@@ -36,12 +36,12 @@
     },
     "autoload": {
         "psr-4": {
-            "ShipMonk\\DoctrineEntityPreloader\\": "src/"
+            "Kyzegs\\DoctrineEntityPreloader\\": "src/"
         }
     },
     "autoload-dev": {
         "psr-4": {
-            "ShipMonkTests\\DoctrineEntityPreloader\\": "tests/"
+            "KyzegsTests\\DoctrineEntityPreloader\\": "tests/"
         }
     },
     "config": {

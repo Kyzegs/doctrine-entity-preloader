@@ -1,8 +1,8 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonk\DoctrineEntityPreloader\PHPStan;
+namespace Kyzegs\DoctrineEntityPreloader\PHPStan;
 
-use ShipMonk\DoctrineEntityPreloader\Exception\RuntimeException;
+use Kyzegs\DoctrineEntityPreloader\Exception\RuntimeException;
 
 final class EntityPreloaderRuleException extends RuntimeException
 {

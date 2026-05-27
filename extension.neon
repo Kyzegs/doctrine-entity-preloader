@@ -1,5 +1,5 @@
 services:
     -
-        class: ShipMonk\DoctrineEntityPreloader\PHPStan\EntityPreloaderReturnTypeExtension
+        class: Kyzegs\DoctrineEntityPreloader\PHPStan\EntityPreloaderReturnTypeExtension
         tags:
             - phpstan.broker.dynamicMethodReturnTypeExtension

@@ -1,6 +1,6 @@
 # Doctrine Entity Preloader
 
-`shipmonk/doctrine-entity-preloader` is a PHP library designed to tackle the n+1 query problem in Doctrine ORM by efficiently preloading related entities. This library offers a flexible and powerful way to optimize database access patterns, especially in cases with complex entity relationships.
+`kyzegs/doctrine-entity-preloader` is a PHP library designed to tackle the n+1 query problem in Doctrine ORM by efficiently preloading related entities. This library offers a flexible and powerful way to optimize database access patterns, especially in cases with complex entity relationships.
 
 - :rocket: **Performance Boost:** Minimizes n+1 issues by preloading related entities with **constant number of queries**.
 - :arrows_counterclockwise: **Flexible:** Supports all associations: `#[OneToOne]`, `#[OneToMany]`, `#[ManyToOne]`, and `#[ManyToMany]`.
@@ -43,7 +43,7 @@ Unlike `Doctrine\ORM\AbstractQuery::setFetchMode` it can
 To install the library, use Composer:
 
 ```sh
-composer require shipmonk/doctrine-entity-preloader
+composer require kyzegs/doctrine-entity-preloader
 ```
 
 ### PHPStan
@@ -59,8 +59,8 @@ Otherwise, add the following to your `phpstan.neon`:
 
 ```neon
 includes:
-    - vendor/shipmonk/doctrine-entity-preloader/extension.neon
-    - vendor/shipmonk/doctrine-entity-preloader/rules.neon
+    - vendor/kyzegs/doctrine-entity-preloader/extension.neon
+    - vendor/kyzegs/doctrine-entity-preloader/rules.neon
 ```
 
 If [phpstan/phpstan-doctrine](https://github.com/phpstan/phpstan-doctrine) is installed and `objectManagerLoader` is used, all mapping formats become available (xml, phpdoc, yaml). Otherwise, only modern attributes are supported.
@@ -70,7 +70,7 @@ If [phpstan/phpstan-doctrine](https://github.com/phpstan/phpstan-doctrine) is in
 Below is a basic example demonstrating how to use `EntityPreloader` to preload related entities and avoid the n+1 problem:
 
 ```php
-use ShipMonk\DoctrineEntityPreloader\EntityPreloader;
+use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
 
 $categories = $entityManager->getRepository(Category::class)->findAll();
 
@@ -112,7 +112,7 @@ Selective preload with Doctrine `Criteria`:
 
 ```php
 use Doctrine\Common\Collections\Criteria;
-use ShipMonk\DoctrineEntityPreloader\Preload;
+use Kyzegs\DoctrineEntityPreloader\Preload;
 
 $entityPreloader->preload($merchants, [
     'transactions' => Preload::criteria(
@@ -130,8 +130,8 @@ foreach ($merchants as $merchant) {
 Advanced query customization with `PreloadQueryBuilder`:
 
 ```php
-use ShipMonk\DoctrineEntityPreloader\Preload;
-use ShipMonk\DoctrineEntityPreloader\PreloadQueryBuilder;
+use Kyzegs\DoctrineEntityPreloader\Preload;
+use Kyzegs\DoctrineEntityPreloader\PreloadQueryBuilder;
 
 $entityPreloader->preload($merchants, [
     'transactions' => Preload::query(
@@ -150,7 +150,7 @@ Nested customized preload:
 
 ```php
 use Doctrine\Common\Collections\Criteria;
-use ShipMonk\DoctrineEntityPreloader\Preload;
+use Kyzegs\DoctrineEntityPreloader\Preload;
 
 $entityPreloader->preload($articles, [
     'comments' => Preload::criteria(

@@ -1,6 +1,6 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonk\DoctrineEntityPreloader;
+namespace Kyzegs\DoctrineEntityPreloader;
 
 use ArrayAccess;
 use Doctrine\Common\Collections\Criteria;
@@ -14,13 +14,13 @@ use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\QueryBuilder;
 use LogicException;
 use ReflectionProperty;
-use ShipMonk\DoctrineEntityPreloader\Exception\DirtyCollectionException;
-use ShipMonk\DoctrineEntityPreloader\Exception\InvalidAssociationException;
-use ShipMonk\DoctrineEntityPreloader\Exception\UnsafePartialCollectionException;
-use ShipMonk\DoctrineEntityPreloader\Exception\UnsupportedAssociationException;
-use ShipMonk\DoctrineEntityPreloader\Exception\UnsupportedCompositeIdentifierException;
-use ShipMonk\DoctrineEntityPreloader\Exception\UnsupportedIndexedCollectionException;
-use ShipMonk\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
+use Kyzegs\DoctrineEntityPreloader\Exception\DirtyCollectionException;
+use Kyzegs\DoctrineEntityPreloader\Exception\InvalidAssociationException;
+use Kyzegs\DoctrineEntityPreloader\Exception\UnsafePartialCollectionException;
+use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedAssociationException;
+use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedCompositeIdentifierException;
+use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedIndexedCollectionException;
+use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
 use function array_chunk;
 use function array_key_exists;
 use function array_values;

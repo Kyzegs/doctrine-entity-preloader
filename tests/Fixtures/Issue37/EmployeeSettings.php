@@ -1,9 +1,9 @@
 <?php declare(strict_types = 1);
 
-namespace ShipMonkTests\DoctrineEntityPreloader\Fixtures\Issue37;
+namespace KyzegsTests\DoctrineEntityPreloader\Fixtures\Issue37;
 
 use Doctrine\ORM\Mapping\Entity;
-use ShipMonkTests\DoctrineEntityPreloader\Fixtures\Synthetic\TestEntityWithId;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Synthetic\TestEntityWithId;
 
 /**
  * @see https://github.com/shipmonk-rnd/doctrine-entity-preloader/issues/37

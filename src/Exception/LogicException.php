@@ -5,7 +5,7 @@ namespace ShipMonk\DoctrineEntityPreloader\Exception;
 use LogicException as NativeLogicException;
 use Throwable;
 
-final class LogicException extends NativeLogicException
+class LogicException extends NativeLogicException
 {
 
     public function __construct(
@@ -18,7 +18,7 @@ final class LogicException extends NativeLogicException
 
     public static function fromException(Throwable $e): self
     {
-        return new static($e->getMessage(), $e);
+        return new self($e->getMessage(), $e);
     }
 
 }

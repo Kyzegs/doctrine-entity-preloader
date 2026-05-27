@@ -95,6 +95,84 @@ foreach ($categories as $category) {
 }
 ```
 
+## Selective Preloading and Partial Collections
+
+`EntityPreloader` can preload filtered relations into Doctrine association itself without rewriting root query and without root fetch joins. This avoids duplicated root rows and keeps root pagination safe.
+
+Simple preload stays unchanged:
+
+```php
+$entityPreloader->preload($orders, [
+    'customer',
+    'items',
+]);
+```
+
+Selective preload with Doctrine `Criteria`:
+
+```php
+use Doctrine\Common\Collections\Criteria;
+use ShipMonk\DoctrineEntityPreloader\Preload;
+
+$entityPreloader->preload($merchants, [
+    'transactions' => Preload::criteria(
+        Criteria::create()
+            ->where(Criteria::expr()->eq('status', TransactionStatus::Paid))
+            ->orderBy(['createdAt' => Criteria::DESC])
+    ),
+]);
+
+foreach ($merchants as $merchant) {
+    $paidTransactions = $merchant->getTransactions(); // initialized
+}
+```
+
+Advanced query customization with `PreloadQueryBuilder`:
+
+```php
+use ShipMonk\DoctrineEntityPreloader\Preload;
+use ShipMonk\DoctrineEntityPreloader\PreloadQueryBuilder;
+
+$entityPreloader->preload($merchants, [
+    'transactions' => Preload::query(
+        static function (PreloadQueryBuilder $query): void {
+            $query
+                ->join('entity.paymentMethod', 'paymentMethod')
+                ->andWhere('paymentMethod.code IN (:codes)')
+                ->setParameter('codes', ['ideal', 'bancontact'])
+                ->addOrderBy('entity.createdAt', 'DESC');
+        }
+    ),
+]);
+```
+
+Nested customized preload:
+
+```php
+use Doctrine\Common\Collections\Criteria;
+use ShipMonk\DoctrineEntityPreloader\Preload;
+
+$entityPreloader->preload($articles, [
+    'comments' => Preload::criteria(
+        Criteria::create()
+            ->where(Criteria::expr()->eq('approved', true))
+    )->preload([
+        'author',
+    ]),
+]);
+```
+
+### Warning: Partial Collections
+
+Selective preloading initializes a partial Doctrine collection. Collection is considered loaded, but can contain only rows matching preload criteria. This is similar to conditional fetch join behavior. Do not use selective mode in code paths expecting full association content.
+
+Additional rules:
+
+- Dirty collections are rejected with `DirtyCollectionException`.
+- Already initialized collections are rejected by default for selective preload. Use `replaceInitializedCollection()` explicitly if overwrite is intended.
+- `Criteria::setMaxResults()` is rejected for to-many selective preloads because it is global child limit, not per-parent limit.
+- Root query stays unchanged; relation rows are loaded in separate preload query.
+
 ## Configuration
 
 `EntityPreloader` allows you to adjust batch sizes and fetch join limits to fit your application's performance needs:

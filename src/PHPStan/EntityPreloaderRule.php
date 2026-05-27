@@ -34,6 +34,15 @@ final class EntityPreloaderRule extends EntityPreloaderCore implements Rule
             return [];
         }
 
+        $args = $node->getArgs();
+        if (!isset($args[1])) {
+            return [];
+        }
+
+        if ($scope->getType($args[1]->value)->isArray()->yes()) {
+            return [];
+        }
+
         $propertyName = $this->getPreloadedPropertyName($node, $scope);
 
         if ($propertyName === null) {

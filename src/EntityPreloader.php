@@ -3,6 +3,7 @@
 namespace ShipMonk\DoctrineEntityPreloader;
 
 use ArrayAccess;
+use Doctrine\Common\Collections\Criteria;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Types\Type;
@@ -13,12 +14,25 @@ use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\QueryBuilder;
 use LogicException;
 use ReflectionProperty;
+use ShipMonk\DoctrineEntityPreloader\Exception\DirtyCollectionException;
+use ShipMonk\DoctrineEntityPreloader\Exception\InvalidAssociationException;
+use ShipMonk\DoctrineEntityPreloader\Exception\UnsafePartialCollectionException;
+use ShipMonk\DoctrineEntityPreloader\Exception\UnsupportedAssociationException;
+use ShipMonk\DoctrineEntityPreloader\Exception\UnsupportedCompositeIdentifierException;
+use ShipMonk\DoctrineEntityPreloader\Exception\UnsupportedIndexedCollectionException;
+use ShipMonk\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
 use function array_chunk;
+use function array_key_exists;
 use function array_values;
 use function count;
 use function get_parent_class;
 use function is_a;
+use function is_array;
+use function is_int;
+use function is_object;
+use function is_string;
 use function method_exists;
+use function spl_object_id;
 
 class EntityPreloader
 {
@@ -34,12 +48,87 @@ class EntityPreloader
 
     /**
      * @param list<object> $sourceEntities
-     * @param literal-string $sourcePropertyName
+     * @param literal-string|array<int|string, string|PreloadConfig> $sourcePropertyName
      * @param positive-int|null $batchSize
      * @param non-negative-int|null $maxFetchJoinSameFieldCount
      * @return list<object>
      */
     public function preload(
+        array $sourceEntities,
+        string|array $sourcePropertyName,
+        ?int $batchSize = null,
+        ?int $maxFetchJoinSameFieldCount = null,
+    ): array
+    {
+        if (is_string($sourcePropertyName)) {
+            return $this->preloadAssociation(
+                sourceEntities: $sourceEntities,
+                sourcePropertyName: $sourcePropertyName,
+                batchSize: $batchSize,
+                maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+            );
+        }
+
+        return $this->preloadConfiguredAssociations(
+            sourceEntities: $sourceEntities,
+            preload: $sourcePropertyName,
+            batchSize: $batchSize,
+            maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+        );
+    }
+
+    /**
+     * @param list<object> $sourceEntities
+     * @param array<int|string, string|PreloadConfig> $preload
+     * @param positive-int|null $batchSize
+     * @param non-negative-int|null $maxFetchJoinSameFieldCount
+     * @return list<object>
+     */
+    private function preloadConfiguredAssociations(
+        array $sourceEntities,
+        array $preload,
+        ?int $batchSize = null,
+        ?int $maxFetchJoinSameFieldCount = null,
+    ): array
+    {
+        $sourceEntitiesCommonAncestor = $this->getCommonAncestor($sourceEntities);
+
+        if ($sourceEntitiesCommonAncestor === null) {
+            return [];
+        }
+
+        /** @var ClassMetadata<object> $sourceClassMetadata */
+        $sourceClassMetadata = $this->entityManager->getClassMetadata($sourceEntitiesCommonAncestor);
+        $maxFetchJoinSameFieldCount ??= 1;
+        $sourceEntities = $this->loadProxies($sourceClassMetadata, $sourceEntities, $batchSize ?? self::PRELOAD_ENTITY_DEFAULT_BATCH_SIZE, $maxFetchJoinSameFieldCount);
+        $normalizedPreload = $this->normalizePreloadSpecification($preload);
+        $allLoadedTargets = [];
+
+        foreach ($normalizedPreload as $association => $config) {
+            $loadedTargets = $this->preloadConfiguredAssociation(
+                sourceEntities: $sourceEntities,
+                sourceClassMetadata: $sourceClassMetadata,
+                sourcePropertyName: $association,
+                preloadConfig: $config,
+                batchSize: $batchSize,
+                maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+            );
+
+            foreach ($loadedTargets as $loadedTarget) {
+                $allLoadedTargets[spl_object_id($loadedTarget)] = $loadedTarget;
+            }
+        }
+
+        return array_values($allLoadedTargets);
+    }
+
+    /**
+     * @param list<object> $sourceEntities
+     * @param positive-int|null $batchSize
+     * @param non-negative-int|null $maxFetchJoinSameFieldCount
+     * @return list<object>
+     */
+    private function preloadAssociation(
         array $sourceEntities,
         string $sourcePropertyName,
         ?int $batchSize = null,
@@ -72,6 +161,417 @@ class EntityPreloader
         };
 
         return $preloader($sourceEntities, $sourceClassMetadata, $sourcePropertyName, $targetClassMetadata, $batchSize, $maxFetchJoinSameFieldCount);
+    }
+
+    /**
+     * @param array<int|string, string|PreloadConfig> $preload
+     * @return array<string, PreloadConfig>
+     */
+    private function normalizePreloadSpecification(array $preload): array
+    {
+        $normalized = [];
+
+        foreach ($preload as $association => $config) {
+            if (is_int($association)) {
+                if (!is_string($config)) {
+                    throw new InvalidAssociationException('Numeric preload keys must contain association names as strings.');
+                }
+
+                $normalized[$config] = Preload::association();
+                continue;
+            }
+
+            if (!$config instanceof PreloadConfig) {
+                throw new InvalidAssociationException("Association '{$association}' must use string shorthand or PreloadConfig.");
+            }
+
+            $normalized[$association] = $config;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param list<object> $sourceEntities
+     * @param ClassMetadata<object> $sourceClassMetadata
+     * @param positive-int|null $batchSize
+     * @param non-negative-int $maxFetchJoinSameFieldCount
+     * @return list<object>
+     */
+    private function preloadConfiguredAssociation(
+        array $sourceEntities,
+        ClassMetadata $sourceClassMetadata,
+        string $sourcePropertyName,
+        PreloadConfig $preloadConfig,
+        ?int $batchSize,
+        int $maxFetchJoinSameFieldCount,
+    ): array
+    {
+        $associationMapping = $sourceClassMetadata->getAssociationMapping($sourcePropertyName);
+        /** @var ClassMetadata<object> $targetClassMetadata */
+        $targetClassMetadata = $this->entityManager->getClassMetadata($associationMapping['targetEntity']);
+
+        if (isset($associationMapping['indexBy'])) {
+            throw new UnsupportedIndexedCollectionException("Association '{$sourceClassMetadata->getName()}::{$sourcePropertyName}' is indexed and cannot be selectively preloaded.");
+        }
+
+        if ($this->isSelectiveConfig($preloadConfig)) {
+            $grouped = $this->preloadSelectiveAssociation(
+                sourceEntities: $sourceEntities,
+                sourceClassMetadata: $sourceClassMetadata,
+                sourcePropertyName: $sourcePropertyName,
+                targetClassMetadata: $targetClassMetadata,
+                associationMapping: $associationMapping,
+                preloadConfig: $preloadConfig,
+                maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+            );
+
+            $this->hydrateSelectiveAssociation(
+                sourceEntities: $sourceEntities,
+                sourceClassMetadata: $sourceClassMetadata,
+                sourcePropertyName: $sourcePropertyName,
+                groupedResultsByOwnerId: $grouped,
+                associationMapping: $associationMapping,
+                preloadConfig: $preloadConfig,
+            );
+
+            $loadedTargets = $this->flattenGroupedSelectiveResults($grouped);
+
+        } else {
+            $loadedTargets = $this->preloadAssociation(
+                sourceEntities: $sourceEntities,
+                sourcePropertyName: $sourcePropertyName,
+                batchSize: $batchSize,
+                maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+            );
+        }
+
+        if (count($preloadConfig->getNestedPreload()) === 0) {
+            return $loadedTargets;
+        }
+
+        if (count($loadedTargets) === 0) {
+            return $loadedTargets;
+        }
+
+        $nestedOwnerMetadata = $targetClassMetadata;
+        $nestedPreload = $this->normalizePreloadSpecification($preloadConfig->getNestedPreload());
+        $allLoadedTargets = [];
+
+        foreach ($loadedTargets as $loadedTarget) {
+            $allLoadedTargets[spl_object_id($loadedTarget)] = $loadedTarget;
+        }
+
+        foreach ($nestedPreload as $nestedAssociation => $nestedConfig) {
+            $nestedLoadedTargets = $this->preloadConfiguredAssociation(
+                sourceEntities: $loadedTargets,
+                sourceClassMetadata: $nestedOwnerMetadata,
+                sourcePropertyName: $nestedAssociation,
+                preloadConfig: $nestedConfig,
+                batchSize: $batchSize,
+                maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+            );
+
+            foreach ($nestedLoadedTargets as $nestedLoadedTarget) {
+                $allLoadedTargets[spl_object_id($nestedLoadedTarget)] = $nestedLoadedTarget;
+            }
+        }
+
+        return array_values($allLoadedTargets);
+    }
+
+    private function isSelectiveConfig(PreloadConfig $preloadConfig): bool
+    {
+        return $preloadConfig->getCriteria() !== null || $preloadConfig->getQueryCustomizer() !== null;
+    }
+
+    /**
+     * @param list<object> $sourceEntities
+     * @param ClassMetadata<object> $sourceClassMetadata
+     * @param ClassMetadata<object> $targetClassMetadata
+     * @param array<string, mixed>|ArrayAccess<string, mixed> $associationMapping
+     * @param non-negative-int $maxFetchJoinSameFieldCount
+     * @return array<string, list<object>>
+     */
+    private function preloadSelectiveAssociation(
+        array $sourceEntities,
+        ClassMetadata $sourceClassMetadata,
+        string $sourcePropertyName,
+        ClassMetadata $targetClassMetadata,
+        array|ArrayAccess $associationMapping,
+        PreloadConfig $preloadConfig,
+        int $maxFetchJoinSameFieldCount,
+    ): array
+    {
+        if (count($sourceClassMetadata->getIdentifierFieldNames()) > 1 || count($targetClassMetadata->getIdentifierFieldNames()) > 1) {
+            throw new UnsupportedCompositeIdentifierException('Selective preload currently supports only single-column identifiers.');
+        }
+
+        $isToMany = ($associationMapping['type'] & ClassMetadata::TO_MANY) !== 0;
+        $criteria = $preloadConfig->getCriteria();
+        $ownerIdentifierType = $this->getIdentifierFieldType($sourceClassMetadata);
+
+        $ownerIdentifierAccessor = $this->getSingleIdPropertyAccessor($sourceClassMetadata);
+        if ($ownerIdentifierAccessor === null) {
+            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
+        }
+
+        $ownerIds = [];
+        foreach ($sourceEntities as $sourceEntity) {
+            $ownerIds[] = $ownerIdentifierAccessor->getValue($sourceEntity);
+        }
+
+        if (count($ownerIds) === 0) {
+            return [];
+        }
+
+        if ($isToMany && $criteria !== null && $criteria->getMaxResults() !== null) {
+            throw new UnsupportedPreloadLimitException('Criteria::setMaxResults() is not supported for to-many selective preloads. It is a global limit, not per-parent limit.');
+        }
+
+        $queryBuilder = $this->createSelectiveQueryBuilder(
+            sourceClassMetadata: $sourceClassMetadata,
+            sourcePropertyName: $sourcePropertyName,
+            targetClassMetadata: $targetClassMetadata,
+            associationMapping: $associationMapping,
+            ownerIds: $ownerIds,
+            ownerIdentifierType: $ownerIdentifierType,
+        );
+
+        if ($criteria !== null) {
+            $this->applyCriteriaToSelectiveQuery($queryBuilder, $criteria, $isToMany);
+        }
+
+        if (count($associationMapping['orderBy'] ?? []) > 0) {
+            foreach ($associationMapping['orderBy'] as $field => $direction) {
+                $queryBuilder->addOrderBy("entity.{$field}", $direction);
+            }
+        }
+
+        $this->addFetchJoinsToPreventFetchDuringHydration('entity', $queryBuilder, $targetClassMetadata, $maxFetchJoinSameFieldCount);
+
+        if ($preloadConfig->getQueryCustomizer() !== null) {
+            $wrappedBuilder = new PreloadQueryBuilder($queryBuilder);
+            ($preloadConfig->getQueryCustomizer())($wrappedBuilder);
+        }
+
+        $hydratedRows = $queryBuilder->getQuery()->getResult();
+        $grouped = [];
+
+        foreach ($hydratedRows as $row) {
+            if (!is_array($row) || !array_key_exists('ownerId', $row)) {
+                throw new UnsupportedAssociationException("Unable to determine owner id for selective preload '{$sourcePropertyName}'.");
+            }
+
+            $entity = $row['entity'] ?? $row[0] ?? null;
+            if (!is_object($entity)) {
+                continue;
+            }
+
+            $ownerKey = (string) $row['ownerId'];
+            $grouped[$ownerKey] ??= [];
+            $grouped[$ownerKey][spl_object_id($entity)] = $entity;
+        }
+
+        foreach ($grouped as $ownerKey => $entitiesByObjectId) {
+            $grouped[$ownerKey] = array_values($entitiesByObjectId);
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * @param list<mixed> $ownerIds
+     * @param array<string, mixed>|ArrayAccess<string, mixed> $associationMapping
+     * @param ClassMetadata<object> $sourceClassMetadata
+     * @param ClassMetadata<object> $targetClassMetadata
+     */
+    private function createSelectiveQueryBuilder(
+        ClassMetadata $sourceClassMetadata,
+        string $sourcePropertyName,
+        ClassMetadata $targetClassMetadata,
+        array|ArrayAccess $associationMapping,
+        array $ownerIds,
+        Type $ownerIdentifierType,
+    ): QueryBuilder
+    {
+        $queryBuilder = $this->entityManager->createQueryBuilder()
+            ->select("owner.{$sourceClassMetadata->getSingleIdentifierFieldName()} AS ownerId", 'entity')
+            ->from($targetClassMetadata->getName(), 'entity');
+
+        $ownerRelation = $this->resolveOwnerRelationForSelectiveQuery($sourceClassMetadata, $sourcePropertyName, $associationMapping);
+
+        if ($ownerRelation !== null) {
+            $queryBuilder
+                ->join("entity.{$ownerRelation}", 'owner')
+                ->andWhere('owner IN (:ownerIds)')
+                ->setParameter(
+                    'ownerIds',
+                    $this->convertFieldValuesToDatabaseValues($ownerIdentifierType, $ownerIds),
+                    $this->deduceArrayParameterType($ownerIdentifierType),
+                );
+
+        } else {
+            throw new UnsupportedAssociationException("Association '{$sourceClassMetadata->getName()}::{$sourcePropertyName}' cannot be selectively preloaded because owner relation is not navigable from target entity.");
+        }
+
+        return $queryBuilder;
+    }
+
+    /**
+     * @param array<string, mixed>|ArrayAccess<string, mixed> $associationMapping
+     * @param ClassMetadata<object> $sourceClassMetadata
+     */
+    private function resolveOwnerRelationForSelectiveQuery(
+        ClassMetadata $sourceClassMetadata,
+        string $sourcePropertyName,
+        array|ArrayAccess $associationMapping,
+    ): ?string
+    {
+        if ($associationMapping['type'] === ClassMetadata::ONE_TO_MANY) {
+            return $associationMapping['mappedBy'];
+        }
+
+        if ($associationMapping['type'] === ClassMetadata::MANY_TO_MANY) {
+            if ($associationMapping['isOwningSide'] === true) {
+                return $associationMapping['inversedBy'] ?? null;
+            }
+
+            return $associationMapping['mappedBy'] ?? null;
+        }
+
+        if (($associationMapping['type'] & ClassMetadata::TO_ONE) !== 0 && $associationMapping['isOwningSide'] === false) {
+            return $associationMapping['mappedBy'] ?? null;
+        }
+
+        if (($associationMapping['type'] & ClassMetadata::TO_ONE) !== 0 && $associationMapping['isOwningSide'] === true) {
+            return $associationMapping['inversedBy'] ?? null;
+        }
+
+        return null;
+    }
+
+    private function applyCriteriaToSelectiveQuery(
+        QueryBuilder $queryBuilder,
+        Criteria $criteria,
+        bool $isToMany,
+    ): void
+    {
+        $queryBuilder->addCriteria($criteria);
+
+        if ($isToMany && $criteria->getFirstResult() !== null) {
+            // Keep explicit: first result is global for whole child result set.
+            $queryBuilder->setFirstResult($criteria->getFirstResult());
+        }
+    }
+
+    /**
+     * @param array<string, list<object>> $groupedResultsByOwnerId
+     * @return list<object>
+     */
+    private function flattenGroupedSelectiveResults(array $groupedResultsByOwnerId): array
+    {
+        $flattened = [];
+        foreach ($groupedResultsByOwnerId as $groupedResult) {
+            foreach ($groupedResult as $targetEntity) {
+                $flattened[spl_object_id($targetEntity)] = $targetEntity;
+            }
+        }
+
+        return array_values($flattened);
+    }
+
+    /**
+     * @param list<object> $sourceEntities
+     * @param array<string, list<object>> $groupedResultsByOwnerId
+     * @param ClassMetadata<object> $sourceClassMetadata
+     * @param array<string, mixed>|ArrayAccess<string, mixed> $associationMapping
+     */
+    private function hydrateSelectiveAssociation(
+        array $sourceEntities,
+        ClassMetadata $sourceClassMetadata,
+        string $sourcePropertyName,
+        array $groupedResultsByOwnerId,
+        array|ArrayAccess $associationMapping,
+        PreloadConfig $preloadConfig,
+    ): void
+    {
+        $sourcePropertyAccessor = $this->getPropertyAccessor($sourceClassMetadata, $sourcePropertyName);
+        if ($sourcePropertyAccessor === null) {
+            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
+        }
+
+        $isToMany = ($associationMapping['type'] & ClassMetadata::TO_MANY) !== 0;
+        foreach ($sourceEntities as $sourceEntity) {
+            $ownerKey = $this->normalizeEntityIdentifier($sourceEntity);
+            $matchedTargets = $groupedResultsByOwnerId[$ownerKey] ?? [];
+
+            if ($isToMany) {
+                $this->hydrateSelectiveToManyCollection(
+                    sourceEntity: $sourceEntity,
+                    sourcePropertyName: $sourcePropertyName,
+                    sourcePropertyAccessor: $sourcePropertyAccessor,
+                    matchedTargets: $matchedTargets,
+                    preloadConfig: $preloadConfig,
+                );
+
+                continue;
+            }
+
+            $matchedTarget = $matchedTargets[0] ?? null;
+            $sourcePropertyAccessor->setValue($sourceEntity, $matchedTarget);
+        }
+    }
+
+    /**
+     * @param list<object> $matchedTargets
+     */
+    private function hydrateSelectiveToManyCollection(
+        object $sourceEntity,
+        string $sourcePropertyName,
+        PropertyAccessor|ReflectionProperty $sourcePropertyAccessor,
+        array $matchedTargets,
+        PreloadConfig $preloadConfig,
+    ): void
+    {
+        $collection = $sourcePropertyAccessor->getValue($sourceEntity);
+        if (!$collection instanceof PersistentCollection) {
+            throw new UnsupportedAssociationException('Association \'' . $sourceEntity::class . "::{$sourcePropertyName}' is expected to be PersistentCollection.");
+        }
+
+        if ($collection->isDirty()) {
+            throw new DirtyCollectionException('Association \'' . $sourceEntity::class . "::{$sourcePropertyName}' is dirty and cannot be selectively preloaded.");
+        }
+
+        if ($collection->isInitialized() && !$preloadConfig->shouldReplaceInitializedCollection()) {
+            throw new UnsafePartialCollectionException('Association \'' . $sourceEntity::class . "::{$sourcePropertyName}' is already initialized. Use replaceInitializedCollection() to allow selective overwrite.");
+        }
+
+        if ($collection->isInitialized()) {
+            $collection->clear();
+        }
+
+        foreach ($matchedTargets as $targetEntity) {
+            $collection->add($targetEntity);
+        }
+
+        $collection->setInitialized(true);
+        $collection->takeSnapshot();
+    }
+
+    private function normalizeEntityIdentifier(object $entity): string
+    {
+        $entityClassMetadata = $this->entityManager->getClassMetadata($entity::class);
+        if (count($entityClassMetadata->getIdentifierFieldNames()) > 1) {
+            throw new UnsupportedCompositeIdentifierException('Entity \'' . $entity::class . '\' has composite identifier.');
+        }
+
+        $identifierAccessor = $this->getSingleIdPropertyAccessor($entityClassMetadata);
+        if ($identifierAccessor === null) {
+            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
+        }
+
+        return (string) $identifierAccessor->getValue($entity);
     }
 
     /**

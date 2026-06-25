@@ -6,17 +6,21 @@ use Doctrine\Common\Collections\Criteria;
 use Doctrine\DBAL\Types\Type as DbalType;
 use Doctrine\ORM\PersistentCollection;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
 use Kyzegs\DoctrineEntityPreloader\Exception\DirtyCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\InvalidAssociationException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsafePartialCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
 use Kyzegs\DoctrineEntityPreloader\Preload;
+use Kyzegs\DoctrineEntityPreloader\PreloadFilterPolicy;
 use Kyzegs\DoctrineEntityPreloader\PreloadQueryBuilder;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Article;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Category;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Comment;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Filter\SoftDeleteableFilter;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Tag;
 use KyzegsTests\DoctrineEntityPreloader\Lib\TestCase;
+use function array_filter;
 use function count;
 use function iterator_to_array;
 
@@ -279,6 +283,125 @@ class EntityPreloadSelectiveTest extends TestCase
         $queryCountAfterAccess = count($this->getQueryLogger()->getQueries());
 
         self::assertSame($queryCountBeforeAccess, $queryCountAfterAccess);
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testEnabledSoftDeleteableFilterAffectsDefaultPreloadQuery(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 1, articleInEachCategoryCount: 3);
+        $this->markFirstArticleAsDeleted();
+        $this->enableSoftDeleteableFilter(0);
+
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+        $this->getEntityPreloader()->preload($categories, 'articles');
+
+        $preloadedArticles = iterator_to_array($categories[0]->getArticles(), false);
+        self::assertCount(2, $preloadedArticles);
+        foreach ($preloadedArticles as $preloadedArticle) {
+            self::assertFalse($preloadedArticle->isDeleted());
+        }
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testGlobalFilterPolicyCanDisableSoftDeleteableFilter(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 1, articleInEachCategoryCount: 3);
+        $this->markFirstArticleAsDeleted();
+        $this->enableSoftDeleteableFilter(0);
+
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+        $preloader = new EntityPreloader(
+            $this->getEntityManager(),
+            PreloadFilterPolicy::create()->disableFilters('softdeleteable'),
+        );
+        $preloader->preload($categories, 'articles');
+
+        $preloadedArticles = iterator_to_array($categories[0]->getArticles(), false);
+        self::assertCount(3, $preloadedArticles);
+        self::assertSame(1, count(array_filter($preloadedArticles, static fn (Article $article): bool => $article->isDeleted())));
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testPerAssociationFilterPolicyOverridesGlobalDefault(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 1, articleInEachCategoryCount: 3);
+        $this->markFirstArticleAsDeleted();
+        $this->enableSoftDeleteableFilter(0);
+
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+        $preloader = new EntityPreloader(
+            $this->getEntityManager(),
+            PreloadFilterPolicy::create()->disableFilters('softdeleteable'),
+        );
+        $preloader->preload($categories, [
+            'articles' => Preload::association()->enableFilters('softdeleteable'),
+        ]);
+
+        $preloadedArticles = iterator_to_array($categories[0]->getArticles(), false);
+        self::assertCount(2, $preloadedArticles);
+        foreach ($preloadedArticles as $preloadedArticle) {
+            self::assertFalse($preloadedArticle->isDeleted());
+        }
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testNestedFilterPolicyInheritsParentAndSupportsOverride(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 1, articleInEachCategoryCount: 2, commentForEachArticleCount: 2);
+        $this->markFirstArticleAsDeleted();
+        $this->markFirstCommentAsDeleted();
+        $this->enableSoftDeleteableFilter(0);
+
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+        $preloader = new EntityPreloader(
+            $this->getEntityManager(),
+            PreloadFilterPolicy::create()->disableFilters('softdeleteable'),
+        );
+
+        $preloader->preload($categories, [
+            'articles' => Preload::association()->preload([
+                'comments' => Preload::association()->enableFilters('softdeleteable'),
+            ]),
+        ]);
+
+        $preloadedArticles = iterator_to_array($categories[0]->getArticles(), false);
+        self::assertCount(2, $preloadedArticles);
+        self::assertSame(1, count(array_filter($preloadedArticles, static fn (Article $article): bool => $article->isDeleted())));
+
+        foreach ($preloadedArticles as $preloadedArticle) {
+            $preloadedComments = iterator_to_array($preloadedArticle->getComments(), false);
+            foreach ($preloadedComments as $preloadedComment) {
+                self::assertFalse($preloadedComment->isDeleted());
+            }
+        }
+    }
+
+    private function enableSoftDeleteableFilter(int $deletedValue): void
+    {
+        $entityManager = $this->getEntityManager();
+        $entityManager->getConfiguration()->addFilter('softdeleteable', SoftDeleteableFilter::class);
+        $softDeleteableFilter = $entityManager->getFilters()->enable('softdeleteable');
+        $softDeleteableFilter->setParameter('deletedValue', $deletedValue, 'integer');
+    }
+
+    private function markFirstArticleAsDeleted(): void
+    {
+        $entityManager = $this->getEntityManager();
+        $articles = $entityManager->getRepository(Article::class)->findAll();
+        $articles[0]->markDeleted();
+        $entityManager->flush();
+        $entityManager->clear();
+        $this->getQueryLogger()->clear();
+    }
+
+    private function markFirstCommentAsDeleted(): void
+    {
+        $entityManager = $this->getEntityManager();
+        $comments = $entityManager->getRepository(Comment::class)->findAll();
+        $comments[0]->markDeleted();
+        $entityManager->flush();
+        $entityManager->clear();
+        $this->getQueryLogger()->clear();
     }
 
 }

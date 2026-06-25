@@ -1,3 +1,5 @@
+![Doctrine Entity Preloader banner](banner.svg)
+
 # Doctrine Entity Preloader
 
 `kyzegs/doctrine-entity-preloader` is a PHP library designed to tackle the n+1 query problem in Doctrine ORM by efficiently preloading related entities. This library offers a flexible and powerful way to optimize database access patterns, especially in cases with complex entity relationships.
@@ -187,6 +189,62 @@ $preloader->preload(
     batchSize: 20,
     maxFetchJoinSameFieldCount: 5
 );
+```
+
+### Doctrine ORM filters (e.g. softdeleteable)
+
+Doctrine ORM SQL filters are applied to preload queries the same way they are applied to repository queries.
+This is separate from `Criteria`-based selective preloading:
+
+- `Criteria` adds explicit conditions to selective preload query.
+- ORM filters are global SQL filters handled by Doctrine (`$entityManager->getFilters()`).
+
+Global default preload filter policy:
+
+```php
+use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
+use Kyzegs\DoctrineEntityPreloader\PreloadFilterPolicy;
+
+$preloader = new EntityPreloader(
+    $entityManager,
+    PreloadFilterPolicy::create()->withoutFilters('softdeleteable'),
+);
+```
+
+Per-association override:
+
+```php
+use Kyzegs\DoctrineEntityPreloader\Preload;
+use Kyzegs\DoctrineEntityPreloader\PreloadFilterPolicy;
+
+$preloader = new EntityPreloader(
+    $entityManager,
+    PreloadFilterPolicy::create()->withoutFilters('softdeleteable'),
+);
+
+$preloader->preload($categories, [
+    'articles' => Preload::association()->enableFilters('softdeleteable'),
+]);
+```
+
+Temporarily set filter parameters for one preload:
+
+```php
+use Kyzegs\DoctrineEntityPreloader\Preload;
+
+$preloader->preload($categories, [
+    'articles' => Preload::association()
+        ->enableFilters('softdeleteable')
+        ->withFilterParameter('softdeleteable', 'deletedValue', 0),
+]);
+```
+
+Factory helpers are also available:
+
+```php
+Preload::enableFilters('softdeleteable');
+Preload::withoutFilters('softdeleteable');
+Preload::withFilterParameter('softdeleteable', 'deletedValue', 0);
 ```
 
 

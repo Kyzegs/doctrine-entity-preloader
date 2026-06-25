@@ -19,6 +19,7 @@ final class PreloadConfig
         private PreloadHydrationMode $hydrationMode = PreloadHydrationMode::FullAssociation,
         private ?int $perParentLimit = null,
         private bool $replaceInitializedCollection = false,
+        private ?PreloadFilterPolicy $filterPolicy = null,
     )
     {
     }
@@ -78,6 +79,36 @@ final class PreloadConfig
         return $clone;
     }
 
+    public function withFilterPolicy(PreloadFilterPolicy $filterPolicy): self
+    {
+        $clone = clone $this;
+        $clone->filterPolicy = $filterPolicy;
+        return $clone;
+    }
+
+    public function enableFilters(string ...$filterNames): self
+    {
+        $filterPolicy = $this->filterPolicy ?? PreloadFilterPolicy::create();
+        return $this->withFilterPolicy($filterPolicy->enableFilters(...$filterNames));
+    }
+
+    public function disableFilters(string ...$filterNames): self
+    {
+        $filterPolicy = $this->filterPolicy ?? PreloadFilterPolicy::create();
+        return $this->withFilterPolicy($filterPolicy->disableFilters(...$filterNames));
+    }
+
+    public function withoutFilters(string ...$filterNames): self
+    {
+        return $this->disableFilters(...$filterNames);
+    }
+
+    public function withFilterParameter(string $filterName, string $parameterName, mixed $value): self
+    {
+        $filterPolicy = $this->filterPolicy ?? PreloadFilterPolicy::create();
+        return $this->withFilterPolicy($filterPolicy->withFilterParameter($filterName, $parameterName, $value));
+    }
+
     public function getCriteria(): ?Criteria
     {
         return $this->criteria;
@@ -112,6 +143,11 @@ final class PreloadConfig
     public function shouldReplaceInitializedCollection(): bool
     {
         return $this->replaceInitializedCollection;
+    }
+
+    public function getFilterPolicy(): ?PreloadFilterPolicy
+    {
+        return $this->filterPolicy;
     }
 
 }

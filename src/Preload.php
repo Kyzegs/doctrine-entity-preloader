@@ -29,4 +29,29 @@ final class Preload
         return self::association()->query($customizer);
     }
 
+    public static function withFilterPolicy(PreloadFilterPolicy $filterPolicy): PreloadConfig
+    {
+        return self::association()->withFilterPolicy($filterPolicy);
+    }
+
+    public static function enableFilters(string ...$filterNames): PreloadConfig
+    {
+        return self::association()->enableFilters(...$filterNames);
+    }
+
+    public static function disableFilters(string ...$filterNames): PreloadConfig
+    {
+        return self::association()->disableFilters(...$filterNames);
+    }
+
+    public static function withoutFilters(string ...$filterNames): PreloadConfig
+    {
+        return self::association()->withoutFilters(...$filterNames);
+    }
+
+    public static function withFilterParameter(string $filterName, string $parameterName, mixed $value): PreloadConfig
+    {
+        return self::association()->withFilterParameter($filterName, $parameterName, $value);
+    }
+
 }

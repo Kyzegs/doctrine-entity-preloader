@@ -24,6 +24,9 @@ class Article extends TestEntityWithCustomPrimaryKey
     #[Column]
     private string $content;
 
+    #[Column]
+    private bool $deleted;
+
     #[ManyToOne(targetEntity: Category::class, inversedBy: 'articles')]
     private ?Category $category;
 
@@ -51,6 +54,7 @@ class Article extends TestEntityWithCustomPrimaryKey
         parent::__construct();
         $this->title = $title;
         $this->content = $content;
+        $this->deleted = false;
         $this->category = $category;
         $this->tags = new ArrayCollection();
         $this->comments = new ArrayCollection();
@@ -66,6 +70,16 @@ class Article extends TestEntityWithCustomPrimaryKey
     public function getContent(): string
     {
         return $this->content;
+    }
+
+    public function isDeleted(): bool
+    {
+        return $this->deleted;
+    }
+
+    public function markDeleted(): void
+    {
+        $this->deleted = true;
     }
 
     public function getCategory(): ?Category

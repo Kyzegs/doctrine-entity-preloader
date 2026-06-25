@@ -19,6 +19,9 @@ class Comment extends TestEntityWithCustomPrimaryKey
     #[Column]
     private string $content;
 
+    #[Column]
+    private bool $deleted;
+
     public function __construct(
         Article $article,
         Contributor $author,
@@ -29,6 +32,7 @@ class Comment extends TestEntityWithCustomPrimaryKey
         $this->article = $article;
         $this->author = $author;
         $this->content = $content;
+        $this->deleted = false;
 
         $article->addComment($this);
         $author->addComment($this);
@@ -47,6 +51,16 @@ class Comment extends TestEntityWithCustomPrimaryKey
     public function getContent(): string
     {
         return $this->content;
+    }
+
+    public function isDeleted(): bool
+    {
+        return $this->deleted;
+    }
+
+    public function markDeleted(): void
+    {
+        $this->deleted = true;
     }
 
 }

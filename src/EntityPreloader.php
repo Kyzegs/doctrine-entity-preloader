@@ -11,6 +11,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Mapping\ClassMetadata;
 use Doctrine\ORM\Mapping\PropertyAccessors\PropertyAccessor;
 use Doctrine\ORM\PersistentCollection;
+use Doctrine\ORM\Query\Filter\SQLFilter;
 use Doctrine\ORM\QueryBuilder;
 use LogicException;
 use ReflectionProperty;
@@ -22,12 +23,14 @@ use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedCompositeIdentifierExcep
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedIndexedCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
 use function array_chunk;
+use function array_keys;
 use function array_key_exists;
 use function array_values;
 use function count;
 use function get_parent_class;
 use function is_a;
 use function is_array;
+use function is_bool;
 use function is_int;
 use function is_object;
 use function is_string;
@@ -42,6 +45,7 @@ class EntityPreloader
 
     public function __construct(
         private EntityManagerInterface $entityManager,
+        private ?PreloadFilterPolicy $defaultFilterPolicy = null,
     )
     {
     }
@@ -89,6 +93,7 @@ class EntityPreloader
         array $preload,
         ?int $batchSize = null,
         ?int $maxFetchJoinSameFieldCount = null,
+        ?PreloadFilterPolicy $parentFilterPolicy = null,
     ): array
     {
         $sourceEntitiesCommonAncestor = $this->getCommonAncestor($sourceEntities);
@@ -100,7 +105,13 @@ class EntityPreloader
         /** @var ClassMetadata<object> $sourceClassMetadata */
         $sourceClassMetadata = $this->entityManager->getClassMetadata($sourceEntitiesCommonAncestor);
         $maxFetchJoinSameFieldCount ??= 1;
-        $sourceEntities = $this->loadProxies($sourceClassMetadata, $sourceEntities, $batchSize ?? self::PRELOAD_ENTITY_DEFAULT_BATCH_SIZE, $maxFetchJoinSameFieldCount);
+        $sourceEntities = $this->loadProxies(
+            classMetadata: $sourceClassMetadata,
+            entities: $sourceEntities,
+            batchSize: $batchSize ?? self::PRELOAD_ENTITY_DEFAULT_BATCH_SIZE,
+            maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+            filterPolicy: $this->resolveFilterPolicy($parentFilterPolicy),
+        );
         $normalizedPreload = $this->normalizePreloadSpecification($preload);
         $allLoadedTargets = [];
 
@@ -112,6 +123,7 @@ class EntityPreloader
                 preloadConfig: $config,
                 batchSize: $batchSize,
                 maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+                parentFilterPolicy: $parentFilterPolicy,
             );
 
             foreach ($loadedTargets as $loadedTarget) {
@@ -133,6 +145,7 @@ class EntityPreloader
         string $sourcePropertyName,
         ?int $batchSize = null,
         ?int $maxFetchJoinSameFieldCount = null,
+        ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
         $sourceEntitiesCommonAncestor = $this->getCommonAncestor($sourceEntities);
@@ -152,7 +165,13 @@ class EntityPreloader
         }
 
         $maxFetchJoinSameFieldCount ??= 1;
-        $sourceEntities = $this->loadProxies($sourceClassMetadata, $sourceEntities, $batchSize ?? self::PRELOAD_ENTITY_DEFAULT_BATCH_SIZE, $maxFetchJoinSameFieldCount);
+        $sourceEntities = $this->loadProxies(
+            classMetadata: $sourceClassMetadata,
+            entities: $sourceEntities,
+            batchSize: $batchSize ?? self::PRELOAD_ENTITY_DEFAULT_BATCH_SIZE,
+            maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+            filterPolicy: $filterPolicy,
+        );
 
         $preloader = match ($associationMapping['type']) {
             ClassMetadata::ONE_TO_ONE, ClassMetadata::MANY_TO_ONE => $this->preloadToOne(...),
@@ -160,7 +179,7 @@ class EntityPreloader
             default => throw new LogicException("Unsupported association mapping type {$associationMapping['type']}"),
         };
 
-        return $preloader($sourceEntities, $sourceClassMetadata, $sourcePropertyName, $targetClassMetadata, $batchSize, $maxFetchJoinSameFieldCount);
+        return $preloader($sourceEntities, $sourceClassMetadata, $sourcePropertyName, $targetClassMetadata, $batchSize, $maxFetchJoinSameFieldCount, $filterPolicy);
     }
 
     /**
@@ -205,8 +224,10 @@ class EntityPreloader
         PreloadConfig $preloadConfig,
         ?int $batchSize,
         int $maxFetchJoinSameFieldCount,
+        ?PreloadFilterPolicy $parentFilterPolicy = null,
     ): array
     {
+        $effectiveFilterPolicy = $this->resolveFilterPolicy($parentFilterPolicy, $preloadConfig->getFilterPolicy());
         $associationMapping = $sourceClassMetadata->getAssociationMapping($sourcePropertyName);
         /** @var ClassMetadata<object> $targetClassMetadata */
         $targetClassMetadata = $this->entityManager->getClassMetadata($associationMapping['targetEntity']);
@@ -224,6 +245,7 @@ class EntityPreloader
                 associationMapping: $associationMapping,
                 preloadConfig: $preloadConfig,
                 maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+                filterPolicy: $effectiveFilterPolicy,
             );
 
             $this->hydrateSelectiveAssociation(
@@ -243,6 +265,7 @@ class EntityPreloader
                 sourcePropertyName: $sourcePropertyName,
                 batchSize: $batchSize,
                 maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+                filterPolicy: $effectiveFilterPolicy,
             );
         }
 
@@ -270,6 +293,7 @@ class EntityPreloader
                 preloadConfig: $nestedConfig,
                 batchSize: $batchSize,
                 maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+                parentFilterPolicy: $effectiveFilterPolicy,
             );
 
             foreach ($nestedLoadedTargets as $nestedLoadedTarget) {
@@ -301,6 +325,7 @@ class EntityPreloader
         array|ArrayAccess $associationMapping,
         PreloadConfig $preloadConfig,
         int $maxFetchJoinSameFieldCount,
+        ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
         if (count($sourceClassMetadata->getIdentifierFieldNames()) > 1 || count($targetClassMetadata->getIdentifierFieldNames()) > 1) {
@@ -355,7 +380,7 @@ class EntityPreloader
             ($preloadConfig->getQueryCustomizer())($wrappedBuilder);
         }
 
-        $hydratedRows = $queryBuilder->getQuery()->getResult();
+        $hydratedRows = $this->executeQueryWithFilterPolicy($queryBuilder, $filterPolicy);
         $grouped = [];
 
         foreach ($hydratedRows as $row) {
@@ -614,6 +639,7 @@ class EntityPreloader
         array $entities,
         int $batchSize,
         int $maxFetchJoinSameFieldCount,
+        ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
         $identifierAccessor = $this->getSingleIdPropertyAccessor($classMetadata); // e.g. Order::$id reflection
@@ -637,7 +663,7 @@ class EntityPreloader
         }
 
         foreach (array_chunk($uninitializedIds, $batchSize) as $idsChunk) {
-            $this->loadEntitiesBy($classMetadata, $identifierName, $classMetadata, $idsChunk, $maxFetchJoinSameFieldCount);
+            $this->loadEntitiesBy($classMetadata, $identifierName, $classMetadata, $idsChunk, $maxFetchJoinSameFieldCount, filterPolicy: $filterPolicy);
         }
 
         return array_values($uniqueEntities);
@@ -658,6 +684,7 @@ class EntityPreloader
         ClassMetadata $targetClassMetadata,
         ?int $batchSize,
         int $maxFetchJoinSameFieldCount,
+        ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
         $sourceIdentifierAccessor = $this->getSingleIdPropertyAccessor($sourceClassMetadata); // e.g. Order::$id reflection
@@ -713,6 +740,7 @@ class EntityPreloader
                 uninitializedSourceEntityIdsChunk: array_values($uninitializedSourceEntityIdsChunk),
                 uninitializedCollections: $uninitializedCollections,
                 maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+                filterPolicy: $filterPolicy,
             );
 
             foreach ($targetEntitiesChunk as $targetEntityKey => $targetEntity) {
@@ -747,6 +775,7 @@ class EntityPreloader
         array $uninitializedSourceEntityIdsChunk,
         array $uninitializedCollections,
         int $maxFetchJoinSameFieldCount,
+        ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
         $targetPropertyName = $sourceClassMetadata->getAssociationMappedByTargetField($sourcePropertyName); // e.g. 'order'
@@ -764,6 +793,7 @@ class EntityPreloader
             $uninitializedSourceEntityIdsChunk,
             $maxFetchJoinSameFieldCount,
             $associationMapping['orderBy'] ?? [],
+            $filterPolicy,
         );
 
         foreach ($targetEntitiesList as $targetEntity) {
@@ -797,6 +827,7 @@ class EntityPreloader
         array $uninitializedSourceEntityIdsChunk,
         array $uninitializedCollections,
         int $maxFetchJoinSameFieldCount,
+        ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
         if (count($associationMapping['orderBy'] ?? []) > 0) {
@@ -808,7 +839,7 @@ class EntityPreloader
 
         $sourceIdentifierType = $this->getIdentifierFieldType($sourceClassMetadata);
 
-        $manyToManyRows = $this->entityManager->createQueryBuilder()
+        $manyToManyQueryBuilder = $this->entityManager->createQueryBuilder()
             ->select("source.{$sourceIdentifierName} AS sourceId", "target.{$targetIdentifierName} AS targetId")
             ->from($sourceClassMetadata->getName(), 'source')
             ->join("source.{$sourcePropertyName}", 'target')
@@ -817,9 +848,9 @@ class EntityPreloader
                 'sourceEntityIds',
                 $this->convertFieldValuesToDatabaseValues($sourceIdentifierType, $uninitializedSourceEntityIdsChunk),
                 $this->deduceArrayParameterType($sourceIdentifierType),
-            )
-            ->getQuery()
-            ->getResult();
+            );
+
+        $manyToManyRows = $this->executeQueryWithFilterPolicy($manyToManyQueryBuilder, $filterPolicy);
 
         $targetEntities = [];
         $uninitializedTargetEntityIds = [];
@@ -839,7 +870,7 @@ class EntityPreloader
             $uninitializedTargetEntityIds[$targetEntityKey] = $targetEntityId;
         }
 
-        foreach ($this->loadEntitiesBy($targetClassMetadata, $targetIdentifierName, $sourceClassMetadata, array_values($uninitializedTargetEntityIds), $maxFetchJoinSameFieldCount) as $targetEntity) {
+        foreach ($this->loadEntitiesBy($targetClassMetadata, $targetIdentifierName, $sourceClassMetadata, array_values($uninitializedTargetEntityIds), $maxFetchJoinSameFieldCount, filterPolicy: $filterPolicy) as $targetEntity) {
             $targetEntityKey = (string) $targetIdentifierAccessor->getValue($targetEntity);
             $targetEntities[$targetEntityKey] = $targetEntity;
         }
@@ -868,6 +899,7 @@ class EntityPreloader
         ClassMetadata $targetClassMetadata,
         ?int $batchSize,
         int $maxFetchJoinSameFieldCount,
+        ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
         $sourcePropertyAccessor = $this->getPropertyAccessor($sourceClassMetadata, $sourcePropertyName); // e.g. Item::$order reflection
@@ -889,7 +921,7 @@ class EntityPreloader
             $targetEntities[] = $targetEntity;
         }
 
-        return $this->loadProxies($targetClassMetadata, $targetEntities, $batchSize, $maxFetchJoinSameFieldCount);
+        return $this->loadProxies($targetClassMetadata, $targetEntities, $batchSize, $maxFetchJoinSameFieldCount, $filterPolicy);
     }
 
     /**
@@ -907,6 +939,7 @@ class EntityPreloader
         array $fieldValues,
         int $maxFetchJoinSameFieldCount,
         array $orderBy = [],
+        ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
         if (count($fieldValues) === 0) {
@@ -932,7 +965,159 @@ class EntityPreloader
             $queryBuilder->addOrderBy("{$rootLevelAlias}.{$field}", $direction);
         }
 
-        return $queryBuilder->getQuery()->getResult();
+        return $this->executeQueryWithFilterPolicy($queryBuilder, $filterPolicy);
+    }
+
+    /**
+     * @return list<object|array<string, mixed>>
+     */
+    private function executeQueryWithFilterPolicy(QueryBuilder $queryBuilder, ?PreloadFilterPolicy $filterPolicy): array
+    {
+        $effectiveFilterPolicy = $this->resolveFilterPolicy($filterPolicy);
+        if ($effectiveFilterPolicy === null || $effectiveFilterPolicy->isEmpty()) {
+            return $queryBuilder->getQuery()->getResult();
+        }
+
+        $filterCollection = $this->entityManager->getFilters();
+
+        /**
+         * @var array<string, array{wasEnabled: bool, parameters: array<string, mixed>}>
+         */
+        $snapshots = [];
+
+        $affectedFilterNames = array_keys($effectiveFilterPolicy->getFilterStates());
+        foreach ($effectiveFilterPolicy->getFilterParameters() as $filterName => $parameters) {
+            if ($parameters === []) {
+                continue;
+            }
+
+            $affectedFilterNames[$filterName] = $filterName;
+        }
+
+        foreach ($affectedFilterNames as $affectedFilterName) {
+            $isEnabled = $filterCollection->isEnabled($affectedFilterName);
+            $snapshots[$affectedFilterName] = [
+                'wasEnabled' => $isEnabled,
+                'parameters' => $isEnabled ? $this->extractFilterParameters($filterCollection->getFilter($affectedFilterName)) : [],
+            ];
+        }
+
+        try {
+            foreach ($effectiveFilterPolicy->getFilterStates() as $filterName => $shouldEnable) {
+                if ($shouldEnable) {
+                    if (!$filterCollection->isEnabled($filterName)) {
+                        $filterCollection->enable($filterName);
+                    }
+                    continue;
+                }
+
+                if ($filterCollection->isEnabled($filterName)) {
+                    $filterCollection->disable($filterName);
+                }
+            }
+
+            foreach ($effectiveFilterPolicy->getFilterParameters() as $filterName => $parameters) {
+                if (!$filterCollection->isEnabled($filterName)) {
+                    if ($effectiveFilterPolicy->hasExplicitState($filterName)) {
+                        continue;
+                    }
+
+                    $filterCollection->enable($filterName);
+                }
+
+                $filter = $filterCollection->getFilter($filterName);
+                $this->restoreFilterParameters($filter, $parameters);
+            }
+
+            return $queryBuilder->getQuery()->getResult();
+
+        } finally {
+            foreach ($snapshots as $filterName => $snapshot) {
+                if (!$snapshot['wasEnabled']) {
+                    if ($filterCollection->isEnabled($filterName)) {
+                        $filterCollection->disable($filterName);
+                    }
+                    continue;
+                }
+
+                if ($filterCollection->isEnabled($filterName)) {
+                    $filterCollection->disable($filterName);
+                }
+
+                $filter = $filterCollection->enable($filterName);
+                $this->restoreFilterParameters($filter, $snapshot['parameters']);
+            }
+        }
+    }
+
+    private function resolveFilterPolicy(?PreloadFilterPolicy ...$filterPolicies): ?PreloadFilterPolicy
+    {
+        $effectiveFilterPolicy = $this->defaultFilterPolicy;
+
+        foreach ($filterPolicies as $filterPolicy) {
+            if ($filterPolicy === null) {
+                continue;
+            }
+
+            $effectiveFilterPolicy = $effectiveFilterPolicy?->merge($filterPolicy) ?? $filterPolicy;
+        }
+
+        return $effectiveFilterPolicy;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function extractFilterParameters(SQLFilter $filter): array
+    {
+        $parametersProperty = new ReflectionProperty(SQLFilter::class, 'parameters');
+        $parametersProperty->setAccessible(true);
+        $parameters = $parametersProperty->getValue($filter);
+
+        if (!is_array($parameters)) {
+            return [];
+        }
+
+        return $parameters;
+    }
+
+    /**
+     * @param array<string, mixed> $parameters
+     */
+    private function restoreFilterParameters(SQLFilter $filter, array $parameters): void
+    {
+        foreach ($parameters as $parameterName => $parameterState) {
+            if (is_object($parameterState) && $parameterState::class === 'Doctrine\ORM\Query\Filter\Parameter') {
+                $valueProperty = new ReflectionProperty($parameterState, 'value');
+                $valueProperty->setAccessible(true);
+                $parameterValue = $valueProperty->getValue($parameterState);
+
+                $typeProperty = new ReflectionProperty($parameterState, 'type');
+                $typeProperty->setAccessible(true);
+                $parameterType = $typeProperty->getValue($parameterState);
+
+                if (is_string($parameterType) || is_bool($parameterType)) {
+                    $filter->setParameter($parameterName, $parameterValue, $parameterType);
+                } else {
+                    $filter->setParameter($parameterName, $parameterValue);
+                }
+
+                continue;
+            }
+
+            if (is_array($parameterState) && array_key_exists('value', $parameterState)) {
+                $parameterType = $parameterState['type'] ?? null;
+                if (is_string($parameterType) || is_bool($parameterType)) {
+                    $filter->setParameter($parameterName, $parameterState['value'], $parameterType);
+                    continue;
+                }
+
+                $filter->setParameter($parameterName, $parameterState['value']);
+                continue;
+            }
+
+            $filter->setParameter($parameterName, $parameterState);
+        }
     }
 
     private function deduceArrayParameterType(Type $dbalType): ArrayParameterType|int|null // @phpstan-ignore return.unusedType (old dbal compat)

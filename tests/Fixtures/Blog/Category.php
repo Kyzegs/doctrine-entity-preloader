@@ -32,6 +32,12 @@ class Category extends TestEntityWithCustomPrimaryKey
     #[OneToMany(targetEntity: Article::class, mappedBy: 'category')]
     private Collection $articles;
 
+    /**
+     * @var Collection<string, Article>
+     */
+    #[OneToMany(targetEntity: Article::class, mappedBy: 'category', indexBy: 'title')]
+    private Collection $articlesByTitle;
+
     public function __construct(
         string $name,
         ?self $parent = null,
@@ -42,6 +48,7 @@ class Category extends TestEntityWithCustomPrimaryKey
         $this->parent = $parent;
         $this->children = new ArrayCollection();
         $this->articles = new ArrayCollection();
+        $this->articlesByTitle = new ArrayCollection();
 
         $parent?->addChild($this);
     }
@@ -70,6 +77,14 @@ class Category extends TestEntityWithCustomPrimaryKey
     public function getArticles(): ReadableCollection
     {
         return $this->articles;
+    }
+
+    /**
+     * @return ReadableCollection<string, Article>
+     */
+    public function getArticlesByTitle(): ReadableCollection
+    {
+        return $this->articlesByTitle;
     }
 
     /**

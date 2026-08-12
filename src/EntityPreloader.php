@@ -24,6 +24,7 @@ use ReflectionProperty;
 use function array_chunk;
 use function array_key_exists;
 use function array_keys;
+use function array_slice;
 use function array_values;
 use function count;
 use function get_debug_type;
@@ -301,7 +302,9 @@ class EntityPreloader
 
     private function isSelectiveConfig(PreloadConfig $preloadConfig): bool
     {
-        return $preloadConfig->getCriteria() !== null || $preloadConfig->getQueryCustomizer() !== null;
+        return $preloadConfig->getCriteria() !== null
+            || $preloadConfig->getQueryCustomizer() !== null
+            || $preloadConfig->getLimitPerParent() !== null;
     }
 
     /**
@@ -404,10 +407,15 @@ class EntityPreloader
             }
         }
 
+        $limitPerParent = $preloadConfig->getLimitPerParent();
         $grouped = [];
 
         foreach ($targetsByOwnerAndObjectId as $ownerKey => $entitiesByObjectId) {
-            $grouped[$ownerKey] = array_values($entitiesByObjectId);
+            $ownerTargets = array_values($entitiesByObjectId);
+
+            // ponytail: every matching row is fetched and the cut happens in PHP, so the limit bounds the
+            // collection, not the query. Move to ROW_NUMBER() OVER (PARTITION BY ...) if row volume hurts.
+            $grouped[$ownerKey] = $limitPerParent === null ? $ownerTargets : array_slice($ownerTargets, 0, $limitPerParent);
         }
 
         return $grouped;
@@ -435,18 +443,26 @@ class EntityPreloader
         $ownerRelation = $this->resolveOwnerRelationForSelectiveQuery($sourceClassMetadata, $sourcePropertyName, $associationMapping);
 
         if ($ownerRelation !== null) {
-            $queryBuilder
-                ->join("entity.{$ownerRelation}", 'owner')
-                ->andWhere('owner IN (:ownerIds)')
-                ->setParameter(
-                    'ownerIds',
-                    $this->convertFieldValuesToDatabaseValues($ownerIdentifierType, $ownerIds),
-                    $this->deduceArrayParameterType($ownerIdentifierType),
-                );
+            $queryBuilder->join("entity.{$ownerRelation}", 'owner');
 
         } else {
-            throw new UnsupportedAssociationException("Association '{$sourceClassMetadata->getName()}::{$sourcePropertyName}' cannot be selectively preloaded because owner relation is not navigable from target entity.");
+            // Unidirectional owning side: the owner is not reachable from the target, so owners are paired
+            // through a correlated MEMBER OF instead of a join. 'entity' stays the first root, which is what
+            // QueryBuilder::addCriteria() resolves unqualified criteria fields against.
+            // ponytail: leans on the planner rewriting the EXISTS into a semi-join. Move to the two-query
+            // id-pairing shape used by preloadManyToManyInner() if that ever shows up in a profile.
+            $queryBuilder
+                ->from($sourceClassMetadata->getName(), 'owner')
+                ->andWhere("entity MEMBER OF owner.{$sourcePropertyName}");
         }
+
+        $queryBuilder
+            ->andWhere('owner IN (:ownerIds)')
+            ->setParameter(
+                'ownerIds',
+                $this->convertFieldValuesToDatabaseValues($ownerIdentifierType, $ownerIds),
+                $this->deduceArrayParameterType($ownerIdentifierType),
+            );
 
         return $queryBuilder;
     }
@@ -855,7 +871,7 @@ class EntityPreloader
             $uninitializedTargetEntityIds[$targetEntityKey] = $targetEntityId;
         }
 
-        foreach ($this->loadEntitiesBy($targetClassMetadata, $targetIdentifierName, $sourceClassMetadata, array_values($uninitializedTargetEntityIds), $maxFetchJoinSameFieldCount, filterPolicy: $filterPolicy) as $targetEntity) {
+        foreach ($this->loadEntitiesBy($targetClassMetadata, $targetIdentifierName, $targetClassMetadata, array_values($uninitializedTargetEntityIds), $maxFetchJoinSameFieldCount, filterPolicy: $filterPolicy) as $targetEntity) {
             $targetEntityKey = (string) $targetIdentifierAccessor->getValue($targetEntity);
             $targetEntities[$targetEntityKey] = $targetEntity;
         }

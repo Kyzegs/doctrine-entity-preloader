@@ -29,6 +29,11 @@ final class Preload
         return self::association()->query($customizer);
     }
 
+    public static function limitPerParent(int $limit): PreloadConfig
+    {
+        return self::association()->limitPerParent($limit);
+    }
+
     public static function withFilterPolicy(PreloadFilterPolicy $filterPolicy): PreloadConfig
     {
         return self::association()->withFilterPolicy($filterPolicy);

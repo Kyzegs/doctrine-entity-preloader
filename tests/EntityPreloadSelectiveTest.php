@@ -9,6 +9,7 @@ use Doctrine\ORM\PersistentCollection;
 use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
 use Kyzegs\DoctrineEntityPreloader\Exception\DirtyCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\InvalidAssociationException;
+use Kyzegs\DoctrineEntityPreloader\Exception\LogicException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsafePartialCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedAssociationException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
@@ -137,6 +138,83 @@ class EntityPreloadSelectiveTest extends TestCase
             self::assertInstanceOf(Tag::class, $tags[0]);
             self::assertSame('Tag#1', $tags[0]->getLabel());
         }
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testSelectiveManyToManyPreloadWorksWithoutInverseSide(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 2, articleInEachCategoryCount: 1, tagForEachArticleCount: 3);
+        $this->attachArticleTagsToTheirCategory();
+
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+
+        $this->getEntityPreloader()->preload($categories, [
+            'tags' => Preload::criteria(
+                Criteria::create(true)->where(Criteria::expr()->eq('label', 'Tag#1')),
+            ),
+        ]);
+
+        foreach ($categories as $category) {
+            $tagsCollection = $category->getTags();
+            self::assertInstanceOf(PersistentCollection::class, $tagsCollection);
+            self::assertTrue($tagsCollection->isInitialized());
+            $tags = iterator_to_array($tagsCollection, false);
+            self::assertCount(1, $tags);
+            self::assertInstanceOf(Tag::class, $tags[0]);
+            self::assertSame('Tag#1', $tags[0]->getLabel());
+        }
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testLimitPerParentKeepsOnlyTheFirstTargetsOfEachOwner(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 2, articleInEachCategoryCount: 4);
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+
+        $this->getEntityPreloader()->preload($categories, [
+            'articles' => Preload::criteria(
+                Criteria::create(true)->orderBy(['title' => Order::Descending]),
+            )->limitPerParent(2),
+        ]);
+
+        foreach ($categories as $category) {
+            $titles = [];
+
+            foreach ($category->getArticles() as $article) {
+                $titles[] = $article->getTitle();
+            }
+
+            self::assertSame(['Article#3', 'Article#2'], $titles);
+        }
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testLimitPerParentWorksWithoutCriteria(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 2, articleInEachCategoryCount: 4);
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+
+        $this->getEntityPreloader()->preload($categories, [
+            'articles' => Preload::limitPerParent(1),
+        ]);
+
+        foreach ($categories as $category) {
+            $articlesCollection = $category->getArticles();
+            self::assertInstanceOf(PersistentCollection::class, $articlesCollection);
+            self::assertTrue($articlesCollection->isInitialized());
+            self::assertCount(1, iterator_to_array($articlesCollection, false));
+        }
+    }
+
+    public function testLimitPerParentRejectsNonPositiveLimit(): void
+    {
+        self::assertException(
+            LogicException::class,
+            'Preload limit per parent must be at least 1.',
+            static function (): void {
+                Preload::limitPerParent(0);
+            },
+        );
     }
 
     #[DataProvider('providePrimaryKeyTypes')]
@@ -463,6 +541,21 @@ class EntityPreloadSelectiveTest extends TestCase
                 self::assertFalse($preloadedComment->isDeleted());
             }
         }
+    }
+
+    private function attachArticleTagsToTheirCategory(): void
+    {
+        $entityManager = $this->getEntityManager();
+
+        foreach ($entityManager->getRepository(Article::class)->findAll() as $article) {
+            foreach ($article->getTags() as $tag) {
+                $article->getCategory()?->addTag($tag);
+            }
+        }
+
+        $entityManager->flush();
+        $entityManager->clear();
+        $this->getQueryLogger()->clear();
     }
 
     private function enableSoftDeleteableFilter(int $deletedValue): void

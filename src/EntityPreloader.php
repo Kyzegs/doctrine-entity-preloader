@@ -252,7 +252,6 @@ class EntityPreloader
                 sourceClassMetadata: $sourceClassMetadata,
                 sourcePropertyName: $sourcePropertyName,
                 groupedResultsByOwnerId: $grouped,
-                associationMapping: $associationMapping,
                 preloadConfig: $preloadConfig,
             );
 
@@ -331,7 +330,12 @@ class EntityPreloader
             throw new UnsupportedCompositeIdentifierException('Selective preload currently supports only single-column identifiers.');
         }
 
-        $isToMany = ($associationMapping['type'] & ClassMetadata::TO_MANY) !== 0;
+        if (($associationMapping['type'] & ClassMetadata::TO_MANY) === 0) {
+            // Writing a filtered result into a to-one association means writing null whenever nothing matched,
+            // which the UnitOfWork sees as a real change and flushes as "UPDATE ... SET fk = NULL".
+            throw new UnsupportedAssociationException("Association '{$sourceClassMetadata->getName()}::{$sourcePropertyName}' is to-one and cannot be selectively preloaded.");
+        }
+
         $criteria = $preloadConfig->getCriteria();
         $ownerIdentifierType = $this->getIdentifierFieldType($sourceClassMetadata);
 
@@ -349,7 +353,7 @@ class EntityPreloader
             return [];
         }
 
-        if ($isToMany && $criteria !== null && $criteria->getMaxResults() !== null) {
+        if ($criteria !== null && $criteria->getMaxResults() !== null) {
             throw new UnsupportedPreloadLimitException('Criteria::setMaxResults() is not supported for to-many selective preloads. It is a global limit, not per-parent limit.');
         }
 
@@ -363,7 +367,7 @@ class EntityPreloader
         );
 
         if ($criteria !== null) {
-            $this->applyCriteriaToSelectiveQuery($queryBuilder, $criteria, $isToMany);
+            $this->applyCriteriaToSelectiveQuery($queryBuilder, $criteria);
         }
 
         if (count($associationMapping['orderBy'] ?? []) > 0) {
@@ -464,26 +468,17 @@ class EntityPreloader
             return $associationMapping['mappedBy'] ?? null;
         }
 
-        if (($associationMapping['type'] & ClassMetadata::TO_ONE) !== 0 && $associationMapping['isOwningSide'] === false) {
-            return $associationMapping['mappedBy'] ?? null;
-        }
-
-        if (($associationMapping['type'] & ClassMetadata::TO_ONE) !== 0 && $associationMapping['isOwningSide'] === true) {
-            return $associationMapping['inversedBy'] ?? null;
-        }
-
         return null;
     }
 
     private function applyCriteriaToSelectiveQuery(
         QueryBuilder $queryBuilder,
         Criteria $criteria,
-        bool $isToMany,
     ): void
     {
         $queryBuilder->addCriteria($criteria);
 
-        if ($isToMany && $criteria->getFirstResult() !== null) {
+        if ($criteria->getFirstResult() !== null) {
             // Keep explicit: first result is global for whole child result set.
             $queryBuilder->setFirstResult($criteria->getFirstResult());
         }
@@ -509,14 +504,12 @@ class EntityPreloader
      * @param list<object> $sourceEntities
      * @param array<string, list<object>> $groupedResultsByOwnerId
      * @param ClassMetadata<object> $sourceClassMetadata
-     * @param array<string, mixed>|ArrayAccess<string, mixed> $associationMapping
      */
     private function hydrateSelectiveAssociation(
         array $sourceEntities,
         ClassMetadata $sourceClassMetadata,
         string $sourcePropertyName,
         array $groupedResultsByOwnerId,
-        array|ArrayAccess $associationMapping,
         PreloadConfig $preloadConfig,
     ): void
     {
@@ -525,25 +518,16 @@ class EntityPreloader
             throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
         }
 
-        $isToMany = ($associationMapping['type'] & ClassMetadata::TO_MANY) !== 0;
         foreach ($sourceEntities as $sourceEntity) {
             $ownerKey = $this->normalizeEntityIdentifier($sourceEntity);
-            $matchedTargets = $groupedResultsByOwnerId[$ownerKey] ?? [];
 
-            if ($isToMany) {
-                $this->hydrateSelectiveToManyCollection(
-                    sourceEntity: $sourceEntity,
-                    sourcePropertyName: $sourcePropertyName,
-                    sourcePropertyAccessor: $sourcePropertyAccessor,
-                    matchedTargets: $matchedTargets,
-                    preloadConfig: $preloadConfig,
-                );
-
-                continue;
-            }
-
-            $matchedTarget = $matchedTargets[0] ?? null;
-            $sourcePropertyAccessor->setValue($sourceEntity, $matchedTarget);
+            $this->hydrateSelectiveToManyCollection(
+                sourceEntity: $sourceEntity,
+                sourcePropertyName: $sourcePropertyName,
+                sourcePropertyAccessor: $sourcePropertyAccessor,
+                matchedTargets: $groupedResultsByOwnerId[$ownerKey] ?? [],
+                preloadConfig: $preloadConfig,
+            );
         }
     }
 
@@ -572,7 +556,9 @@ class EntityPreloader
         }
 
         if ($collection->isInitialized()) {
-            $collection->clear();
+            // PersistentCollection::clear() schedules a collection deletion (and orphan removal) in the UnitOfWork,
+            // which the takeSnapshot() below does not undo. Empty the backing collection instead.
+            $collection->unwrap()->clear();
         }
 
         foreach ($matchedTargets as $targetEntity) {

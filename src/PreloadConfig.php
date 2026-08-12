@@ -103,7 +103,11 @@ final class PreloadConfig
         return $this->disableFilters(...$filterNames);
     }
 
-    public function withFilterParameter(string $filterName, string $parameterName, mixed $value): self
+    public function withFilterParameter(
+        string $filterName,
+        string $parameterName,
+        mixed $value,
+    ): self
     {
         $filterPolicy = $this->filterPolicy ?? PreloadFilterPolicy::create();
         return $this->withFilterPolicy($filterPolicy->withFilterParameter($filterName, $parameterName, $value));

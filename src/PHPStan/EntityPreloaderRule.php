@@ -2,6 +2,7 @@
 
 namespace Kyzegs\DoctrineEntityPreloader\PHPStan;
 
+use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
 use PhpParser\Node;
 use PhpParser\Node\Expr\MethodCall;
 use PhpParser\Node\Identifier;
@@ -9,7 +10,6 @@ use PHPStan\Analyser\Scope;
 use PHPStan\Rules\Rule;
 use PHPStan\Rules\RuleErrorBuilder;
 use PHPStan\Type\ObjectType;
-use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
 
 /**
  * @implements Rule<MethodCall>

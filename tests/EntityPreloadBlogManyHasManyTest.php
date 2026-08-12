@@ -4,9 +4,9 @@ namespace KyzegsTests\DoctrineEntityPreloader;
 
 use Doctrine\DBAL\Types\Type as DbalType;
 use Doctrine\ORM\Mapping\ClassMetadata;
-use PHPUnit\Framework\Attributes\DataProvider;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Article;
 use KyzegsTests\DoctrineEntityPreloader\Lib\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use function array_map;
 
 class EntityPreloadBlogManyHasManyTest extends TestCase

@@ -5,9 +5,9 @@ namespace KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Type;
 use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Types\Type;
-use LogicException;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\PrimaryKey;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Compat\CompatibilityType;
+use LogicException;
 use function get_debug_type;
 use function is_int;
 

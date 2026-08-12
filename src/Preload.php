@@ -49,7 +49,11 @@ final class Preload
         return self::association()->withoutFilters(...$filterNames);
     }
 
-    public static function withFilterParameter(string $filterName, string $parameterName, mixed $value): PreloadConfig
+    public static function withFilterParameter(
+        string $filterName,
+        string $parameterName,
+        mixed $value,
+    ): PreloadConfig
     {
         return self::association()->withFilterParameter($filterName, $parameterName, $value);
     }

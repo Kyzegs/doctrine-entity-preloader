@@ -3,7 +3,6 @@
 namespace KyzegsTests\DoctrineEntityPreloader;
 
 use Doctrine\DBAL\Types\IntegerType;
-use PHPUnit\Framework\Attributes\DataProvider;
 use Kyzegs\DoctrineEntityPreloader\Exception\LogicException;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Synthetic\AbstractEntityWithNoRelations;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Synthetic\ChildEntityWithNoRelationsA;
@@ -27,6 +26,7 @@ use KyzegsTests\DoctrineEntityPreloader\Fixtures\Synthetic\OneToOne\OneToOneUnid
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Synthetic\SingleTableInheritance\ConcreteStiEntityWithOptionalManyToOneOfItselfRelation;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Synthetic\SingleTableInheritance\EntityWithManyToOneOfManyToOneItselfStiRelation;
 use KyzegsTests\DoctrineEntityPreloader\Lib\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use function array_fill;
 use function implode;
 use function intdiv;

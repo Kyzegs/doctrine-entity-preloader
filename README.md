@@ -173,7 +173,9 @@ Additional rules:
 - Dirty collections are rejected with `DirtyCollectionException`.
 - Already initialized collections are rejected by default for selective preload. Use `replaceInitializedCollection()` explicitly if overwrite is intended.
 - `Criteria::setMaxResults()` is rejected for to-many selective preloads because it is global child limit, not per-parent limit.
-- Root query stays unchanged; relation rows are loaded in separate preload query.
+- `Criteria::setFirstResult()` is rejected for the same reason: it is a global offset, not a per-parent offset.
+- Selective preload of a to-one association is rejected. A non-matching filter would assign `null` to the association, which Doctrine flushes as `UPDATE ... SET fk = NULL`.
+- Root query stays unchanged; relation rows are loaded in separate preload queries, batched by `batchSize` (100 owners per query by default).
 
 ## Configuration
 

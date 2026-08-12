@@ -3,7 +3,6 @@
 namespace Kyzegs\DoctrineEntityPreloader;
 
 use ArrayAccess;
-use Doctrine\Common\Collections\Criteria;
 use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\ParameterType;
 use Doctrine\DBAL\Types\Type;
@@ -243,6 +242,7 @@ class EntityPreloader
                 targetClassMetadata: $targetClassMetadata,
                 associationMapping: $associationMapping,
                 preloadConfig: $preloadConfig,
+                batchSize: $batchSize,
                 maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
                 filterPolicy: $effectiveFilterPolicy,
             );
@@ -312,6 +312,7 @@ class EntityPreloader
      * @param ClassMetadata<object> $sourceClassMetadata
      * @param ClassMetadata<object> $targetClassMetadata
      * @param array<string, mixed>|ArrayAccess<string, mixed> $associationMapping
+     * @param positive-int|null $batchSize
      * @param non-negative-int $maxFetchJoinSameFieldCount
      * @return array<string, list<object>>
      */
@@ -322,6 +323,7 @@ class EntityPreloader
         ClassMetadata $targetClassMetadata,
         array|ArrayAccess $associationMapping,
         PreloadConfig $preloadConfig,
+        ?int $batchSize,
         int $maxFetchJoinSameFieldCount,
         ?PreloadFilterPolicy $filterPolicy = null,
     ): array
@@ -357,51 +359,57 @@ class EntityPreloader
             throw new UnsupportedPreloadLimitException('Criteria::setMaxResults() is not supported for to-many selective preloads. It is a global limit, not per-parent limit.');
         }
 
-        $queryBuilder = $this->createSelectiveQueryBuilder(
-            sourceClassMetadata: $sourceClassMetadata,
-            sourcePropertyName: $sourcePropertyName,
-            targetClassMetadata: $targetClassMetadata,
-            associationMapping: $associationMapping,
-            ownerIds: $ownerIds,
-            ownerIdentifierType: $ownerIdentifierType,
-        );
-
-        if ($criteria !== null) {
-            $this->applyCriteriaToSelectiveQuery($queryBuilder, $criteria);
+        if ($criteria !== null && ($criteria->getFirstResult() ?? 0) > 0) {
+            throw new UnsupportedPreloadLimitException('Criteria::setFirstResult() is not supported for to-many selective preloads. It is a global offset, not per-parent offset.');
         }
 
-        if (count($associationMapping['orderBy'] ?? []) > 0) {
-            foreach ($associationMapping['orderBy'] as $field => $direction) {
+        $batchSize ??= self::PRELOAD_COLLECTION_DEFAULT_BATCH_SIZE;
+        $targetsByOwnerAndObjectId = [];
+
+        foreach (array_chunk($ownerIds, $batchSize) as $ownerIdsChunk) {
+            $queryBuilder = $this->createSelectiveQueryBuilder(
+                sourceClassMetadata: $sourceClassMetadata,
+                sourcePropertyName: $sourcePropertyName,
+                targetClassMetadata: $targetClassMetadata,
+                associationMapping: $associationMapping,
+                ownerIds: $ownerIdsChunk,
+                ownerIdentifierType: $ownerIdentifierType,
+            );
+
+            if ($criteria !== null) {
+                $queryBuilder->addCriteria($criteria);
+            }
+
+            foreach ($associationMapping['orderBy'] ?? [] as $field => $direction) {
                 $queryBuilder->addOrderBy("entity.{$field}", $direction);
             }
+
+            $this->addFetchJoinsToPreventFetchDuringHydration('entity', $queryBuilder, $targetClassMetadata, $maxFetchJoinSameFieldCount);
+
+            if ($preloadConfig->getQueryCustomizer() !== null) {
+                $wrappedBuilder = new PreloadQueryBuilder($queryBuilder);
+                ($preloadConfig->getQueryCustomizer())($wrappedBuilder);
+            }
+
+            foreach ($this->executeRowQuery($queryBuilder, $filterPolicy) as $row) {
+                if (!array_key_exists('ownerId', $row)) {
+                    throw new UnsupportedAssociationException("Unable to determine owner id for selective preload '{$sourcePropertyName}'.");
+                }
+
+                $entity = $row['entity'] ?? $row[0] ?? null;
+                if (!is_object($entity)) {
+                    continue;
+                }
+
+                $ownerKey = (string) $row['ownerId'];
+                $targetsByOwnerAndObjectId[$ownerKey] ??= [];
+                $targetsByOwnerAndObjectId[$ownerKey][spl_object_id($entity)] = $entity;
+            }
         }
 
-        $this->addFetchJoinsToPreventFetchDuringHydration('entity', $queryBuilder, $targetClassMetadata, $maxFetchJoinSameFieldCount);
-
-        if ($preloadConfig->getQueryCustomizer() !== null) {
-            $wrappedBuilder = new PreloadQueryBuilder($queryBuilder);
-            ($preloadConfig->getQueryCustomizer())($wrappedBuilder);
-        }
-
-        $hydratedRows = $this->executeRowQuery($queryBuilder, $filterPolicy);
         $grouped = [];
 
-        foreach ($hydratedRows as $row) {
-            if (!array_key_exists('ownerId', $row)) {
-                throw new UnsupportedAssociationException("Unable to determine owner id for selective preload '{$sourcePropertyName}'.");
-            }
-
-            $entity = $row['entity'] ?? $row[0] ?? null;
-            if (!is_object($entity)) {
-                continue;
-            }
-
-            $ownerKey = (string) $row['ownerId'];
-            $grouped[$ownerKey] ??= [];
-            $grouped[$ownerKey][spl_object_id($entity)] = $entity;
-        }
-
-        foreach ($grouped as $ownerKey => $entitiesByObjectId) {
+        foreach ($targetsByOwnerAndObjectId as $ownerKey => $entitiesByObjectId) {
             $grouped[$ownerKey] = array_values($entitiesByObjectId);
         }
 
@@ -469,19 +477,6 @@ class EntityPreloader
         }
 
         return null;
-    }
-
-    private function applyCriteriaToSelectiveQuery(
-        QueryBuilder $queryBuilder,
-        Criteria $criteria,
-    ): void
-    {
-        $queryBuilder->addCriteria($criteria);
-
-        if ($criteria->getFirstResult() !== null) {
-            // Keep explicit: first result is global for whole child result set.
-            $queryBuilder->setFirstResult($criteria->getFirstResult());
-        }
     }
 
     /**

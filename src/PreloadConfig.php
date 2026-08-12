@@ -16,8 +16,6 @@ final class PreloadConfig
         private ?Criteria $criteria = null,
         private $queryCustomizer = null,
         private array $nestedPreload = [],
-        private PreloadHydrationMode $hydrationMode = PreloadHydrationMode::FullAssociation,
-        private ?int $perParentLimit = null,
         private bool $replaceInitializedCollection = false,
         private ?PreloadFilterPolicy $filterPolicy = null,
     )
@@ -28,7 +26,6 @@ final class PreloadConfig
     {
         $clone = clone $this;
         $clone->criteria = $criteria;
-        $clone->hydrationMode = PreloadHydrationMode::PartialCollection;
         return $clone;
     }
 
@@ -39,7 +36,6 @@ final class PreloadConfig
     {
         $clone = clone $this;
         $clone->queryCustomizer = $customizer instanceof Closure ? $customizer : Closure::fromCallable($customizer);
-        $clone->hydrationMode = PreloadHydrationMode::PartialCollection;
         return $clone;
     }
 
@@ -50,25 +46,6 @@ final class PreloadConfig
     {
         $clone = clone $this;
         $clone->nestedPreload = $preload;
-        return $clone;
-    }
-
-    public function hydrateAsPartialCollection(): self
-    {
-        return $this->hydrationMode(PreloadHydrationMode::PartialCollection);
-    }
-
-    public function hydrationMode(PreloadHydrationMode $hydrationMode): self
-    {
-        $clone = clone $this;
-        $clone->hydrationMode = $hydrationMode;
-        return $clone;
-    }
-
-    public function perParentLimit(int $limit): self
-    {
-        $clone = clone $this;
-        $clone->perParentLimit = $limit;
         return $clone;
     }
 
@@ -132,16 +109,6 @@ final class PreloadConfig
     public function getNestedPreload(): array
     {
         return $this->nestedPreload;
-    }
-
-    public function getHydrationMode(): PreloadHydrationMode
-    {
-        return $this->hydrationMode;
-    }
-
-    public function getPerParentLimit(): ?int
-    {
-        return $this->perParentLimit;
     }
 
     public function shouldReplaceInitializedCollection(): bool

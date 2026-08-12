@@ -174,6 +174,7 @@ Additional rules:
 - Already initialized collections are rejected by default for selective preload. Use `replaceInitializedCollection()` explicitly if overwrite is intended.
 - `Criteria::setMaxResults()` is rejected for to-many selective preloads because it is global child limit, not per-parent limit.
 - `Criteria::setFirstResult()` is rejected for the same reason: it is a global offset, not a per-parent offset.
+- Indexed associations (`indexBy`) are preloaded with their collection keys intact, as long as `indexBy` names a mapped field.
 - Selective preload of a to-one association is rejected. A non-matching filter would assign `null` to the association, which Doctrine flushes as `UPDATE ... SET fk = NULL`.
 - Root query stays unchanged; relation rows are loaded in separate preload queries, batched by `batchSize` (100 owners per query by default).
 
@@ -252,6 +253,5 @@ Preload::withFilterParameter('softdeleteable', 'deletedValue', 0);
 
 ## Limitations
 
-- no support for indexed collections
 - no support for dirty collections
 - no support for composite primary keys

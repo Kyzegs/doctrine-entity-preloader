@@ -26,6 +26,7 @@ use function array_key_exists;
 use function array_keys;
 use function array_values;
 use function count;
+use function get_debug_type;
 use function get_parent_class;
 use function is_a;
 use function is_array;
@@ -158,10 +159,6 @@ class EntityPreloader
         /** @var ClassMetadata<object> $targetClassMetadata */
         $targetClassMetadata = $this->entityManager->getClassMetadata($associationMapping['targetEntity']);
 
-        if (isset($associationMapping['indexBy'])) {
-            throw new LogicException('Preloading of indexed associations is not supported');
-        }
-
         $maxFetchJoinSameFieldCount ??= 1;
         $sourceEntities = $this->loadProxies(
             classMetadata: $sourceClassMetadata,
@@ -230,10 +227,6 @@ class EntityPreloader
         /** @var ClassMetadata<object> $targetClassMetadata */
         $targetClassMetadata = $this->entityManager->getClassMetadata($associationMapping['targetEntity']);
 
-        if (isset($associationMapping['indexBy'])) {
-            throw new UnsupportedIndexedCollectionException("Association '{$sourceClassMetadata->getName()}::{$sourcePropertyName}' is indexed and cannot be selectively preloaded.");
-        }
-
         if ($this->isSelectiveConfig($preloadConfig)) {
             $grouped = $this->preloadSelectiveAssociation(
                 sourceEntities: $sourceEntities,
@@ -253,6 +246,7 @@ class EntityPreloader
                 sourcePropertyName: $sourcePropertyName,
                 groupedResultsByOwnerId: $grouped,
                 preloadConfig: $preloadConfig,
+                indexByAccessor: $this->getIndexByAccessor($targetClassMetadata, $associationMapping),
             );
 
             $loadedTargets = $this->flattenGroupedSelectiveResults($grouped);
@@ -506,6 +500,7 @@ class EntityPreloader
         string $sourcePropertyName,
         array $groupedResultsByOwnerId,
         PreloadConfig $preloadConfig,
+        PropertyAccessor|ReflectionProperty|null $indexByAccessor,
     ): void
     {
         $sourcePropertyAccessor = $this->getPropertyAccessor($sourceClassMetadata, $sourcePropertyName);
@@ -522,6 +517,7 @@ class EntityPreloader
                 sourcePropertyAccessor: $sourcePropertyAccessor,
                 matchedTargets: $groupedResultsByOwnerId[$ownerKey] ?? [],
                 preloadConfig: $preloadConfig,
+                indexByAccessor: $indexByAccessor,
             );
         }
     }
@@ -535,6 +531,7 @@ class EntityPreloader
         PropertyAccessor|ReflectionProperty $sourcePropertyAccessor,
         array $matchedTargets,
         PreloadConfig $preloadConfig,
+        PropertyAccessor|ReflectionProperty|null $indexByAccessor,
     ): void
     {
         $collection = $sourcePropertyAccessor->getValue($sourceEntity);
@@ -557,7 +554,7 @@ class EntityPreloader
         }
 
         foreach ($matchedTargets as $targetEntity) {
-            $collection->add($targetEntity);
+            $this->addToPreloadedCollection($collection, $targetEntity, $indexByAccessor);
         }
 
         $collection->setInitialized(true);
@@ -741,7 +738,7 @@ class EntityPreloader
      * @param ClassMetadata<object> $sourceClassMetadata
      * @param ClassMetadata<object> $targetClassMetadata
      * @param list<mixed> $uninitializedSourceEntityIdsChunk
-     * @param array<string, PersistentCollection<int, object>> $uninitializedCollections
+     * @param array<string, PersistentCollection<int|string, object>> $uninitializedCollections
      * @param non-negative-int $maxFetchJoinSameFieldCount
      * @return array<string, object>
      */
@@ -766,6 +763,8 @@ class EntityPreloader
             throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
         }
 
+        $indexByAccessor = $this->getIndexByAccessor($targetClassMetadata, $associationMapping);
+
         $targetEntitiesList = $this->loadEntitiesBy(
             $targetClassMetadata,
             $targetPropertyName,
@@ -779,7 +778,7 @@ class EntityPreloader
         foreach ($targetEntitiesList as $targetEntity) {
             $sourceEntity = $targetPropertyAccessor->getValue($targetEntity);
             $sourceEntityKey = (string) $sourceIdentifierAccessor->getValue($sourceEntity);
-            $uninitializedCollections[$sourceEntityKey]->add($targetEntity);
+            $this->addToPreloadedCollection($uninitializedCollections[$sourceEntityKey], $targetEntity, $indexByAccessor);
 
             $targetEntityKey = (string) $targetIdentifierAccessor->getValue($targetEntity);
             $targetEntities[$targetEntityKey] = $targetEntity;
@@ -793,7 +792,7 @@ class EntityPreloader
      * @param ClassMetadata<object> $sourceClassMetadata
      * @param ClassMetadata<object> $targetClassMetadata
      * @param list<mixed> $uninitializedSourceEntityIdsChunk
-     * @param array<string, PersistentCollection<int, object>> $uninitializedCollections
+     * @param array<string, PersistentCollection<int|string, object>> $uninitializedCollections
      * @param non-negative-int $maxFetchJoinSameFieldCount
      * @return array<string, object>
      */
@@ -814,6 +813,7 @@ class EntityPreloader
             throw new LogicException('Many-to-many associations with order by are not supported');
         }
 
+        $indexByAccessor = $this->getIndexByAccessor($targetClassMetadata, $associationMapping);
         $sourceIdentifierName = $sourceClassMetadata->getSingleIdentifierFieldName();
         $targetIdentifierName = $targetClassMetadata->getSingleIdentifierFieldName();
 
@@ -858,7 +858,7 @@ class EntityPreloader
         foreach ($manyToManyRows as $manyToManyRow) {
             $sourceEntityKey = (string) $manyToManyRow['sourceId'];
             $targetEntityKey = (string) $manyToManyRow['targetId'];
-            $uninitializedCollections[$sourceEntityKey]->add($targetEntities[$targetEntityKey]);
+            $this->addToPreloadedCollection($uninitializedCollections[$sourceEntityKey], $targetEntities[$targetEntityKey], $indexByAccessor);
         }
 
         return $targetEntities;
@@ -1228,6 +1228,58 @@ class EntityPreloader
 
             $this->addFetchJoinsToPreventFetchDuringHydration($targetRelationAlias, $queryBuilder, $targetClassMetadata, $maxFetchJoinSameFieldCount, $alreadyPreloadedJoins);
         }
+    }
+
+    /**
+     * @param ClassMetadata<object> $targetClassMetadata
+     * @param array<string, mixed>|ArrayAccess<string, mixed> $associationMapping
+     */
+    private function getIndexByAccessor(
+        ClassMetadata $targetClassMetadata,
+        array|ArrayAccess $associationMapping,
+    ): PropertyAccessor|ReflectionProperty|null
+    {
+        $indexByFieldName = $associationMapping['indexBy'] ?? null;
+
+        if ($indexByFieldName === null) {
+            return null;
+        }
+
+        if (!is_string($indexByFieldName) || !$targetClassMetadata->hasField($indexByFieldName)) {
+            throw new UnsupportedIndexedCollectionException("Association indexed by '{$targetClassMetadata->getName()}::\${$indexByFieldName}' cannot be preloaded because it is not a mapped field.");
+        }
+
+        $indexByAccessor = $this->getPropertyAccessor($targetClassMetadata, $indexByFieldName);
+
+        if ($indexByAccessor === null) {
+            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
+        }
+
+        return $indexByAccessor;
+    }
+
+    /**
+     * @param PersistentCollection<int|string, object> $collection
+     */
+    private function addToPreloadedCollection(
+        PersistentCollection $collection,
+        object $targetEntity,
+        PropertyAccessor|ReflectionProperty|null $indexByAccessor,
+    ): void
+    {
+        if ($indexByAccessor === null) {
+            $collection->add($targetEntity);
+            return;
+        }
+
+        $indexValue = $indexByAccessor->getValue($targetEntity);
+
+        if (!is_int($indexValue) && !is_string($indexValue)) {
+            throw new UnsupportedIndexedCollectionException('Association \'' . $targetEntity::class . "' is indexed by a value of type '" . get_debug_type($indexValue) . "', which cannot be used as a collection key.");
+        }
+
+        // PersistentCollection::set() initializes the collection first, which is exactly what preloading avoids.
+        $collection->unwrap()->set($indexValue, $targetEntity);
     }
 
     /**

@@ -809,10 +809,6 @@ class EntityPreloader
         ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
-        if (count($associationMapping['orderBy'] ?? []) > 0) {
-            throw new LogicException('Many-to-many associations with order by are not supported');
-        }
-
         $indexByAccessor = $this->getIndexByAccessor($targetClassMetadata, $associationMapping);
         $sourceIdentifierName = $sourceClassMetadata->getSingleIdentifierFieldName();
         $targetIdentifierName = $targetClassMetadata->getSingleIdentifierFieldName();
@@ -829,6 +825,12 @@ class EntityPreloader
                 $this->convertFieldValuesToDatabaseValues($sourceIdentifierType, $uninitializedSourceEntityIdsChunk),
                 $this->deduceArrayParameterType($sourceIdentifierType),
             );
+
+        // Ordering the pair query by the target fields is enough: rows are consumed in query order,
+        // so each source collection ends up filled in that order too.
+        foreach ($associationMapping['orderBy'] ?? [] as $field => $direction) {
+            $manyToManyQueryBuilder->addOrderBy("target.{$field}", $direction);
+        }
 
         $manyToManyRows = $this->executeRowQuery($manyToManyQueryBuilder, $filterPolicy);
 

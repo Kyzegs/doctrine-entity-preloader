@@ -10,6 +10,7 @@ use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
 use Kyzegs\DoctrineEntityPreloader\Exception\DirtyCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\InvalidAssociationException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsafePartialCollectionException;
+use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedAssociationException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
 use Kyzegs\DoctrineEntityPreloader\Preload;
 use Kyzegs\DoctrineEntityPreloader\PreloadFilterPolicy;
@@ -261,6 +262,48 @@ class EntityPreloadSelectiveTest extends TestCase
         $afterReplace = iterator_to_array($category->getArticles(), false);
         self::assertCount(1, $afterReplace);
         self::assertSame('Article#0', $afterReplace[0]->getTitle());
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testReplacingInitializedCollectionKeepsPersistedRowsOnFlush(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, articleInEachCategoryCount: 1, tagForEachArticleCount: 3);
+        $entityManager = $this->getEntityManager();
+        $article = $entityManager->getRepository(Article::class)->findAll()[0];
+        $article->getTags()->count(); // force initialization
+
+        $this->getEntityPreloader()->preload([$article], [
+            'tags' => Preload::criteria(
+                Criteria::create(true)->where(Criteria::expr()->eq('label', 'Tag#1')),
+            )->replaceInitializedCollection(),
+        ]);
+
+        $entityManager->flush();
+
+        self::assertSame(3, (int) $entityManager->getConnection()->fetchOne('SELECT COUNT(*) FROM article_tag'));
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testSelectiveToOnePreloadIsRejected(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 1, articleInEachCategoryCount: 2);
+        $articles = $this->getEntityManager()->getRepository(Article::class)->findAll();
+
+        self::assertException(
+            UnsupportedAssociationException::class,
+            "Association 'KyzegsTests\\DoctrineEntityPreloader\\Fixtures\\Blog\\Article::category' is to-one and cannot be selectively preloaded.",
+            function () use ($articles): void {
+                $this->getEntityPreloader()->preload($articles, [
+                    'category' => Preload::criteria(
+                        Criteria::create(true)->where(Criteria::expr()->eq('name', 'Category#0')),
+                    ),
+                ]);
+            },
+        );
+
+        $this->getEntityManager()->flush();
+
+        self::assertSame(0, (int) $this->getEntityManager()->getConnection()->fetchOne('SELECT COUNT(*) FROM article WHERE category_id IS NULL'));
     }
 
     #[DataProvider('providePrimaryKeyTypes')]

@@ -14,12 +14,12 @@ use Doctrine\ORM\Query\Filter\SQLFilter;
 use Doctrine\ORM\QueryBuilder;
 use Kyzegs\DoctrineEntityPreloader\Exception\DirtyCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\InvalidAssociationException;
+use Kyzegs\DoctrineEntityPreloader\Exception\LogicException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsafePartialCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedAssociationException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedCompositeIdentifierException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedIndexedCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
-use LogicException;
 use ReflectionProperty;
 use function array_chunk;
 use function array_key_exists;
@@ -174,7 +174,7 @@ class EntityPreloader
         $preloader = match ($associationMapping['type']) {
             ClassMetadata::ONE_TO_ONE, ClassMetadata::MANY_TO_ONE => $this->preloadToOne(...),
             ClassMetadata::ONE_TO_MANY, ClassMetadata::MANY_TO_MANY => $this->preloadToMany(...),
-            default => throw new LogicException("Unsupported association mapping type {$associationMapping['type']}"),
+            default => throw new UnsupportedAssociationException("Unsupported association mapping type {$associationMapping['type']}."),
         };
 
         return $preloader($sourceEntities, $sourceClassMetadata, $sourcePropertyName, $targetClassMetadata, $batchSize, $maxFetchJoinSameFieldCount, $filterPolicy);
@@ -706,7 +706,7 @@ class EntityPreloader
         $innerLoader = match ($associationMapping['type']) {
             ClassMetadata::ONE_TO_MANY => $this->preloadOneToManyInner(...),
             ClassMetadata::MANY_TO_MANY => $this->preloadManyToManyInner(...),
-            default => throw new LogicException('Unsupported association mapping type'),
+            default => throw new UnsupportedAssociationException('Unsupported association mapping type.'),
         };
 
         foreach (array_chunk($uninitializedSourceEntityIds, $batchSize, preserve_keys: true) as $uninitializedSourceEntityIdsChunk) {

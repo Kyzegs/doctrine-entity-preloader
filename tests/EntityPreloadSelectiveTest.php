@@ -176,6 +176,51 @@ class EntityPreloadSelectiveTest extends TestCase
     }
 
     #[DataProvider('providePrimaryKeyTypes')]
+    public function testRejectsToManyFirstResultCriteria(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 1, articleInEachCategoryCount: 3);
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+
+        self::assertException(
+            UnsupportedPreloadLimitException::class,
+            'Criteria::setFirstResult() is not supported for to-many selective preloads. It is a global offset, not per-parent offset.',
+            function () use ($categories): void {
+                $this->getEntityPreloader()->preload($categories, [
+                    'articles' => Preload::criteria(
+                        Criteria::create(true)
+                            ->where(Criteria::expr()->contains('title', 'Article'))
+                            ->setFirstResult(1),
+                    ),
+                ]);
+            },
+        );
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testSelectivePreloadSplitsOwnerIdsIntoBatches(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 5, articleInEachCategoryCount: 2);
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+        $this->getQueryLogger()->clear();
+
+        $this->getEntityPreloader()->preload(
+            $categories,
+            [
+                'articles' => Preload::criteria(
+                    Criteria::create(true)->where(Criteria::expr()->eq('title', 'Article#0')),
+                ),
+            ],
+            batchSize: 2,
+        );
+
+        self::assertCount(3, $this->getQueryLogger()->getQueries());
+
+        foreach ($categories as $category) {
+            self::assertCount(1, iterator_to_array($category->getArticles(), false));
+        }
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
     public function testEmptyOwnersReturnEmptyResultWithoutQueries(DbalType $primaryKey): void
     {
         $this->createDummyBlogData($primaryKey, categoryCount: 1, articleInEachCategoryCount: 1);

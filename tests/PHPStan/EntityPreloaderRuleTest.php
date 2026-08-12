@@ -2,8 +2,8 @@
 
 namespace KyzegsTests\DoctrineEntityPreloader\PHPStan;
 
-use PHPStan\Rules\Rule;
 use Kyzegs\DoctrineEntityPreloader\PHPStan\EntityPreloaderRule;
+use PHPStan\Rules\Rule;
 use ShipMonk\PHPStanDev\RuleTestCase;
 
 /**

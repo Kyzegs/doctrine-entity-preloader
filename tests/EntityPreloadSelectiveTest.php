@@ -3,9 +3,9 @@
 namespace KyzegsTests\DoctrineEntityPreloader;
 
 use Doctrine\Common\Collections\Criteria;
+use Doctrine\Common\Collections\Order;
 use Doctrine\DBAL\Types\Type as DbalType;
 use Doctrine\ORM\PersistentCollection;
-use PHPUnit\Framework\Attributes\DataProvider;
 use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
 use Kyzegs\DoctrineEntityPreloader\Exception\DirtyCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\InvalidAssociationException;
@@ -20,6 +20,7 @@ use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Comment;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Filter\SoftDeleteableFilter;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Tag;
 use KyzegsTests\DoctrineEntityPreloader\Lib\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use function array_filter;
 use function count;
 use function iterator_to_array;
@@ -39,9 +40,9 @@ class EntityPreloadSelectiveTest extends TestCase
 
         $this->getEntityPreloader()->preload($categories, [
             'articles' => Preload::criteria(
-                Criteria::create()
+                Criteria::create(true)
                     ->where(Criteria::expr()->eq('title', 'Article#0'))
-                    ->orderBy(['id' => Criteria::DESC]),
+                    ->orderBy(['id' => Order::Descending]),
             ),
         ]);
 
@@ -97,10 +98,10 @@ class EntityPreloadSelectiveTest extends TestCase
 
         $this->getEntityPreloader()->preload($categories, [
             'articles' => Preload::criteria(
-                Criteria::create()->where(Criteria::expr()->eq('title', 'Article#0')),
+                Criteria::create(true)->where(Criteria::expr()->eq('title', 'Article#0')),
             )->preload([
                 'comments' => Preload::criteria(
-                    Criteria::create()->where(Criteria::expr()->eq('content', 'Comment #0')),
+                    Criteria::create(true)->where(Criteria::expr()->eq('content', 'Comment #0')),
                 ),
             ]),
         ]);
@@ -122,7 +123,7 @@ class EntityPreloadSelectiveTest extends TestCase
 
         $this->getEntityPreloader()->preload($articles, [
             'tags' => Preload::criteria(
-                Criteria::create()->where(Criteria::expr()->eq('label', 'Tag#1')),
+                Criteria::create(true)->where(Criteria::expr()->eq('label', 'Tag#1')),
             ),
         ]);
 
@@ -164,7 +165,7 @@ class EntityPreloadSelectiveTest extends TestCase
             function () use ($categories): void {
                 $this->getEntityPreloader()->preload($categories, [
                     'articles' => Preload::criteria(
-                        Criteria::create()
+                        Criteria::create(true)
                             ->where(Criteria::expr()->contains('title', 'Article'))
                             ->setMaxResults(1),
                     ),
@@ -220,7 +221,7 @@ class EntityPreloadSelectiveTest extends TestCase
             function () use ($category): void {
                 $this->getEntityPreloader()->preload([$category], [
                     'articles' => Preload::criteria(
-                        Criteria::create()->where(Criteria::expr()->eq('title', 'Article#0')),
+                        Criteria::create(true)->where(Criteria::expr()->eq('title', 'Article#0')),
                     ),
                 ]);
             },
@@ -245,7 +246,7 @@ class EntityPreloadSelectiveTest extends TestCase
             function () use ($category): void {
                 $this->getEntityPreloader()->preload([$category], [
                     'articles' => Preload::criteria(
-                        Criteria::create()->where(Criteria::expr()->eq('title', 'Article#0')),
+                        Criteria::create(true)->where(Criteria::expr()->eq('title', 'Article#0')),
                     ),
                 ]);
             },
@@ -253,7 +254,7 @@ class EntityPreloadSelectiveTest extends TestCase
 
         $this->getEntityPreloader()->preload([$category], [
             'articles' => Preload::criteria(
-                Criteria::create()->where(Criteria::expr()->eq('title', 'Article#0')),
+                Criteria::create(true)->where(Criteria::expr()->eq('title', 'Article#0')),
             )->replaceInitializedCollection(),
         ]);
 
@@ -270,7 +271,7 @@ class EntityPreloadSelectiveTest extends TestCase
 
         $this->getEntityPreloader()->preload($categories, [
             'articles' => Preload::criteria(
-                Criteria::create()->where(Criteria::expr()->eq('title', 'Article#0')),
+                Criteria::create(true)->where(Criteria::expr()->eq('title', 'Article#0')),
             ),
         ]);
 
@@ -318,7 +319,7 @@ class EntityPreloadSelectiveTest extends TestCase
 
         $preloadedArticles = iterator_to_array($categories[0]->getArticles(), false);
         self::assertCount(3, $preloadedArticles);
-        self::assertSame(1, count(array_filter($preloadedArticles, static fn (Article $article): bool => $article->isDeleted())));
+        self::assertCount(1, array_filter($preloadedArticles, static fn (Article $article): bool => $article->isDeleted()));
     }
 
     #[DataProvider('providePrimaryKeyTypes')]
@@ -366,7 +367,7 @@ class EntityPreloadSelectiveTest extends TestCase
 
         $preloadedArticles = iterator_to_array($categories[0]->getArticles(), false);
         self::assertCount(2, $preloadedArticles);
-        self::assertSame(1, count(array_filter($preloadedArticles, static fn (Article $article): bool => $article->isDeleted())));
+        self::assertCount(1, array_filter($preloadedArticles, static fn (Article $article): bool => $article->isDeleted()));
 
         foreach ($preloadedArticles as $preloadedArticle) {
             $preloadedComments = iterator_to_array($preloadedArticle->getComments(), false);

@@ -2,9 +2,9 @@
 
 namespace KyzegsTests\DoctrineEntityPreloader\PHPStan;
 
+use Kyzegs\DoctrineEntityPreloader\PHPStan\EntityPreloaderRule;
 use PHPStan\Rules\Rule;
 use PHPStan\Type\Doctrine\ObjectMetadataResolver;
-use Kyzegs\DoctrineEntityPreloader\PHPStan\EntityPreloaderRule;
 use ShipMonk\PHPStanDev\RuleTestCase;
 
 /**

@@ -48,7 +48,11 @@ final class PreloadFilterPolicy
         return $this->disableFilters(...$filterNames);
     }
 
-    public function withFilterParameter(string $filterName, string $parameterName, mixed $value): self
+    public function withFilterParameter(
+        string $filterName,
+        string $parameterName,
+        mixed $value,
+    ): self
     {
         $clone = clone $this;
         $clone->filterParameters[$filterName] ??= [];

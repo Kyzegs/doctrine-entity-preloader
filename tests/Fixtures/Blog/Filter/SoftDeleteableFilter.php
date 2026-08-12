@@ -11,8 +11,12 @@ final class SoftDeleteableFilter extends SQLFilter
 
     /**
      * @param ClassMetadata<object> $targetEntity
+     * @param string $targetTableAlias Untyped in Doctrine ORM 2.19, so it cannot be narrowed here.
      */
-    public function addFilterConstraint(ClassMetadata $targetEntity, $targetTableAlias): string
+    public function addFilterConstraint(
+        ClassMetadata $targetEntity,
+        $targetTableAlias,
+    ): string
     {
         if (!$targetEntity->hasField('deleted')) {
             return '';

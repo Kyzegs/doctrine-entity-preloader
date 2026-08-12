@@ -13,8 +13,6 @@ use Doctrine\ORM\Mapping\PropertyAccessors\PropertyAccessor;
 use Doctrine\ORM\PersistentCollection;
 use Doctrine\ORM\Query\Filter\SQLFilter;
 use Doctrine\ORM\QueryBuilder;
-use LogicException;
-use ReflectionProperty;
 use Kyzegs\DoctrineEntityPreloader\Exception\DirtyCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\InvalidAssociationException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsafePartialCollectionException;
@@ -22,15 +20,16 @@ use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedAssociationException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedCompositeIdentifierException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedIndexedCollectionException;
 use Kyzegs\DoctrineEntityPreloader\Exception\UnsupportedPreloadLimitException;
+use LogicException;
+use ReflectionProperty;
 use function array_chunk;
-use function array_keys;
 use function array_key_exists;
+use function array_keys;
 use function array_values;
 use function count;
 use function get_parent_class;
 use function is_a;
 use function is_array;
-use function is_bool;
 use function is_int;
 use function is_object;
 use function is_string;
@@ -380,11 +379,11 @@ class EntityPreloader
             ($preloadConfig->getQueryCustomizer())($wrappedBuilder);
         }
 
-        $hydratedRows = $this->executeQueryWithFilterPolicy($queryBuilder, $filterPolicy);
+        $hydratedRows = $this->executeRowQuery($queryBuilder, $filterPolicy);
         $grouped = [];
 
         foreach ($hydratedRows as $row) {
-            if (!is_array($row) || !array_key_exists('ownerId', $row)) {
+            if (!array_key_exists('ownerId', $row)) {
                 throw new UnsupportedAssociationException("Unable to determine owner id for selective preload '{$sourcePropertyName}'.");
             }
 
@@ -850,7 +849,7 @@ class EntityPreloader
                 $this->deduceArrayParameterType($sourceIdentifierType),
             );
 
-        $manyToManyRows = $this->executeQueryWithFilterPolicy($manyToManyQueryBuilder, $filterPolicy);
+        $manyToManyRows = $this->executeRowQuery($manyToManyQueryBuilder, $filterPolicy);
 
         $targetEntities = [];
         $uninitializedTargetEntityIds = [];
@@ -965,13 +964,54 @@ class EntityPreloader
             $queryBuilder->addOrderBy("{$rootLevelAlias}.{$field}", $direction);
         }
 
-        return $this->executeQueryWithFilterPolicy($queryBuilder, $filterPolicy);
+        return $this->executeEntityQuery($queryBuilder, $filterPolicy);
     }
 
     /**
-     * @return list<object|array<string, mixed>>
+     * @return list<object>
      */
-    private function executeQueryWithFilterPolicy(QueryBuilder $queryBuilder, ?PreloadFilterPolicy $filterPolicy): array
+    private function executeEntityQuery(
+        QueryBuilder $queryBuilder,
+        ?PreloadFilterPolicy $filterPolicy,
+    ): array
+    {
+        $entities = [];
+
+        foreach ($this->executeQueryWithFilterPolicy($queryBuilder, $filterPolicy) as $result) {
+            if (is_object($result)) {
+                $entities[] = $result;
+            }
+        }
+
+        return $entities;
+    }
+
+    /**
+     * @return list<array<array-key, mixed>>
+     */
+    private function executeRowQuery(
+        QueryBuilder $queryBuilder,
+        ?PreloadFilterPolicy $filterPolicy,
+    ): array
+    {
+        $rows = [];
+
+        foreach ($this->executeQueryWithFilterPolicy($queryBuilder, $filterPolicy) as $result) {
+            if (is_array($result)) {
+                $rows[] = $result;
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @return list<mixed>
+     */
+    private function executeQueryWithFilterPolicy(
+        QueryBuilder $queryBuilder,
+        ?PreloadFilterPolicy $filterPolicy,
+    ): array
     {
         $effectiveFilterPolicy = $this->resolveFilterPolicy($filterPolicy);
         if ($effectiveFilterPolicy === null || $effectiveFilterPolicy->isEmpty()) {
@@ -980,9 +1020,7 @@ class EntityPreloader
 
         $filterCollection = $this->entityManager->getFilters();
 
-        /**
-         * @var array<string, array{wasEnabled: bool, parameters: array<string, mixed>}>
-         */
+        /** @var array<string, array{wasEnabled: bool, parameters: array<string, mixed>}> $snapshots */
         $snapshots = [];
 
         $affectedFilterNames = array_keys($effectiveFilterPolicy->getFilterStates());
@@ -1084,7 +1122,10 @@ class EntityPreloader
     /**
      * @param array<string, mixed> $parameters
      */
-    private function restoreFilterParameters(SQLFilter $filter, array $parameters): void
+    private function restoreFilterParameters(
+        SQLFilter $filter,
+        array $parameters,
+    ): void
     {
         foreach ($parameters as $parameterName => $parameterState) {
             if (is_object($parameterState) && $parameterState::class === 'Doctrine\ORM\Query\Filter\Parameter') {
@@ -1096,7 +1137,7 @@ class EntityPreloader
                 $typeProperty->setAccessible(true);
                 $parameterType = $typeProperty->getValue($parameterState);
 
-                if (is_string($parameterType) || is_bool($parameterType)) {
+                if (is_string($parameterType)) {
                     $filter->setParameter($parameterName, $parameterValue, $parameterType);
                 } else {
                     $filter->setParameter($parameterName, $parameterValue);
@@ -1107,7 +1148,7 @@ class EntityPreloader
 
             if (is_array($parameterState) && array_key_exists('value', $parameterState)) {
                 $parameterType = $parameterState['type'] ?? null;
-                if (is_string($parameterType) || is_bool($parameterType)) {
+                if (is_string($parameterType)) {
                     $filter->setParameter($parameterName, $parameterState['value'], $parameterType);
                     continue;
                 }

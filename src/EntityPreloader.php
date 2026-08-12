@@ -33,6 +33,7 @@ use function is_array;
 use function is_int;
 use function is_object;
 use function is_string;
+use function iterator_to_array;
 use function method_exists;
 use function spl_object_id;
 
@@ -50,22 +51,24 @@ class EntityPreloader
     }
 
     /**
-     * @param list<object> $sourceEntities
+     * @param iterable<object> $sourceEntities
      * @param literal-string|array<int|string, string|PreloadConfig> $sourcePropertyName
      * @param positive-int|null $batchSize
      * @param non-negative-int|null $maxFetchJoinSameFieldCount
      * @return list<object>
      */
     public function preload(
-        array $sourceEntities,
+        iterable $sourceEntities,
         string|array $sourcePropertyName,
         ?int $batchSize = null,
         ?int $maxFetchJoinSameFieldCount = null,
     ): array
     {
+        $sourceEntityList = is_array($sourceEntities) ? array_values($sourceEntities) : iterator_to_array($sourceEntities, false);
+
         if (is_string($sourcePropertyName)) {
             return $this->preloadAssociation(
-                sourceEntities: $sourceEntities,
+                sourceEntities: $sourceEntityList,
                 sourcePropertyName: $sourcePropertyName,
                 batchSize: $batchSize,
                 maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
@@ -73,7 +76,7 @@ class EntityPreloader
         }
 
         return $this->preloadConfiguredAssociations(
-            sourceEntities: $sourceEntities,
+            sourceEntities: $sourceEntityList,
             preload: $sourcePropertyName,
             batchSize: $batchSize,
             maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,

@@ -97,6 +97,12 @@ foreach ($categories as $category) {
 }
 ```
 
+Any `iterable` of entities works as the source, so a Doctrine `Collection` can be passed straight through:
+
+```php
+$preloader->preload($category->getArticles(), 'comments');
+```
+
 ## Selective Preloading and Partial Collections
 
 `EntityPreloader` can preload filtered relations into Doctrine association itself without rewriting root query and without root fetch joins. This avoids duplicated root rows and keeps root pagination safe.

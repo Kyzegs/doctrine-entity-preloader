@@ -55,12 +55,17 @@ final class PreloadQueryBuilder
         return $this;
     }
 
+    /**
+     * @param ?string $type DBAL type name, e.g. Types::DATETIME_IMMUTABLE. For binding types such as
+     *                      ArrayParameterType, reach for getDoctrineQueryBuilder().
+     */
     public function setParameter(
         string $name,
         mixed $value,
+        ?string $type = null,
     ): self
     {
-        $this->queryBuilder->setParameter($name, $value);
+        $this->queryBuilder->setParameter($name, $value, $type);
         return $this;
     }
 

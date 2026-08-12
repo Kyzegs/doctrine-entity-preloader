@@ -7,8 +7,10 @@ use Doctrine\Common\Collections\Collection;
 use Doctrine\Common\Collections\ReadableCollection;
 use Doctrine\ORM\Mapping\Column;
 use Doctrine\ORM\Mapping\Entity;
+use Doctrine\ORM\Mapping\ManyToMany;
 use Doctrine\ORM\Mapping\ManyToOne;
 use Doctrine\ORM\Mapping\OneToMany;
+use Doctrine\ORM\Mapping\OrderBy;
 
 #[Entity]
 class Category extends TestEntityWithCustomPrimaryKey
@@ -38,6 +40,13 @@ class Category extends TestEntityWithCustomPrimaryKey
     #[OneToMany(targetEntity: Article::class, mappedBy: 'category', indexBy: 'title')]
     private Collection $articlesByTitle;
 
+    /**
+     * @var Collection<int, Tag>
+     */
+    #[ManyToMany(targetEntity: Tag::class)]
+    #[OrderBy(['label' => 'DESC'])]
+    private Collection $tags;
+
     public function __construct(
         string $name,
         ?self $parent = null,
@@ -49,6 +58,7 @@ class Category extends TestEntityWithCustomPrimaryKey
         $this->children = new ArrayCollection();
         $this->articles = new ArrayCollection();
         $this->articlesByTitle = new ArrayCollection();
+        $this->tags = new ArrayCollection();
 
         $parent?->addChild($this);
     }
@@ -85,6 +95,21 @@ class Category extends TestEntityWithCustomPrimaryKey
     public function getArticlesByTitle(): ReadableCollection
     {
         return $this->articlesByTitle;
+    }
+
+    /**
+     * @return ReadableCollection<int, Tag>
+     */
+    public function getTags(): ReadableCollection
+    {
+        return $this->tags;
+    }
+
+    public function addTag(Tag $tag): void
+    {
+        if (!$this->tags->contains($tag)) {
+            $this->tags->add($tag);
+        }
     }
 
     /**

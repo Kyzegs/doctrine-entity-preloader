@@ -53,8 +53,8 @@ final class PreloadConfig
     }
 
     /**
-     * Keeps at most $limit targets per owner collection. Unlike Criteria::setMaxResults(), which is a
-     * global row limit, this is applied per owner - but all matching rows are still fetched.
+     * Keeps at most $limit targets per owner collection, where Criteria::setMaxResults() is a global row limit.
+     * The database still matches every row; only the survivors are hydrated as entities.
      */
     public function limitPerParent(int $limit): self
     {
@@ -91,11 +91,6 @@ final class PreloadConfig
     {
         $filterPolicy = $this->filterPolicy ?? PreloadFilterPolicy::create();
         return $this->withFilterPolicy($filterPolicy->disableFilters(...$filterNames));
-    }
-
-    public function withoutFilters(string ...$filterNames): self
-    {
-        return $this->disableFilters(...$filterNames);
     }
 
     public function withFilterParameter(

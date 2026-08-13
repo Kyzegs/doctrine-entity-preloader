@@ -18,6 +18,8 @@
 >
     <php>
         <ini name="error_reporting" value="-1"/>
+        <!-- The PHPStan rule tests load phpstan.phar, which alone needs more than PHP's stock 128M. -->
+        <ini name="memory_limit" value="512M"/>
         <env name="DOCTRINE_DEPRECATIONS" value="trigger"/>
     </php>
 

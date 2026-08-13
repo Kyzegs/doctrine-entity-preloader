@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use function array_keys;
 use function count;
 use function iterator_to_array;
+use function sort;
 
 class EntityPreloadIndexedCollectionTest extends TestCase
 {
@@ -27,7 +28,12 @@ class EntityPreloadIndexedCollectionTest extends TestCase
 
         foreach ($categories as $category) {
             $articlesByTitle = $category->getArticlesByTitle();
-            self::assertSame(['Article#0', 'Article#1', 'Article#2'], array_keys(iterator_to_array($articlesByTitle, true)));
+
+            // The association has no orderBy, so row order is up to the platform - only the key set matters.
+            $titles = array_keys(iterator_to_array($articlesByTitle, true));
+            sort($titles);
+
+            self::assertSame(['Article#0', 'Article#1', 'Article#2'], $titles);
             self::assertSame('Article#1', $articlesByTitle->get('Article#1')?->getTitle());
         }
 

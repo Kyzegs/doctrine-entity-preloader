@@ -8,21 +8,17 @@ use Doctrine\ORM\Mapping\OneToOne;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Synthetic\TestEntityWithId;
 
 /**
+ * Both associations deliberately omit targetEntity.
+ *
  * @see https://github.com/shipmonk-rnd/doctrine-entity-preloader/issues/37
  */
 #[Entity]
 class Employee extends TestEntityWithId
 {
 
-    /**
-     * ManyToOne WITHOUT explicit targetEntity
-     */
     #[ManyToOne]
     private ?Employee $supervisor;
 
-    /**
-     * OneToOne WITHOUT explicit targetEntity
-     */
     #[OneToOne]
     private ?EmployeeSettings $settings;
 

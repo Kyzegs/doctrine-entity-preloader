@@ -8,7 +8,7 @@ use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Logging\Middleware;
 use Doctrine\DBAL\ParameterType;
-use Doctrine\DBAL\Types\Type;
+use Doctrine\DBAL\Tools\DsnParser;
 use Doctrine\DBAL\Types\Type as DbalType;
 use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\EntityManagerInterface;
@@ -33,8 +33,8 @@ use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\User;
 use PHPUnit\Framework\TestCase as PhpUnitTestCase;
 use Psr\Log\LoggerInterface;
 use Throwable;
+use function getenv;
 use function method_exists;
-use function unlink;
 use function version_compare;
 use const PHP_VERSION_ID;
 
@@ -58,12 +58,18 @@ abstract class TestCase extends PhpUnitTestCase
         yield 'base64string' => [new PrimaryKeyBase64StringType()];
     }
 
-    protected function setUp(): void
+    /**
+     * PHPUnit keeps every test instance alive, so an EntityManager left on a property keeps its
+     * metadata factory, schema and connection alive too - the suite runs out of memory without this.
+     */
+    protected function tearDown(): void
     {
-        parent::setUp();
-        $this->queryLogger = null;
+        $this->entityManager?->getConnection()->close();
         $this->entityManager = null;
         $this->entityPreloader = null;
+        $this->queryLogger = null;
+
+        parent::tearDown();
     }
 
     /**
@@ -209,7 +215,7 @@ abstract class TestCase extends PhpUnitTestCase
 
     protected function getQueryLogger(): QueryLogger
     {
-        return $this->queryLogger ??= $this->createQueryLogger();
+        return $this->queryLogger ??= new QueryLogger();
     }
 
     protected function getEntityManager(): EntityManagerInterface
@@ -222,21 +228,14 @@ abstract class TestCase extends PhpUnitTestCase
 
     protected function getEntityPreloader(): EntityPreloader
     {
-        return $this->entityPreloader ??= $this->createEntityPreloader($this->getEntityManager());
-    }
-
-    private function createQueryLogger(): QueryLogger
-    {
-        return new QueryLogger();
+        return $this->entityPreloader ??= new EntityPreloader($this->getEntityManager());
     }
 
     private function createEntityManager(
         DbalType $primaryKey,
         LoggerInterface $logger,
-        bool $inMemory = true,
     ): EntityManagerInterface
     {
-        // Use new non-deprecated API on Doctrine ORM 3.5+ with PHP 8.4+
         if (PHP_VERSION_ID >= 8_04_00 && method_exists(ORMSetup::class, 'createAttributeMetadataConfig')) { // @phpstan-ignore function.alreadyNarrowedType (BC for older Doctrine)
             $config = ORMSetup::createAttributeMetadataConfig([__DIR__ . '/../Fixtures'], isDevMode: true);
             $config->enableNativeLazyObjects(true);
@@ -247,16 +246,8 @@ abstract class TestCase extends PhpUnitTestCase
         $config->setNamingStrategy(new UnderscoreNamingStrategy());
         $config->setMiddlewares([new Middleware($logger)]);
 
-        if ($inMemory) {
-            $driverOptions = ['memory' => true];
-
-        } else {
-            $path = __DIR__ . '/../../cache/db.sqlite';
-            $driverOptions = ['path' => $path];
-            @unlink($path);
-        }
-
-        $connection = DriverManager::getConnection(['driver' => 'pdo_sqlite'] + $driverOptions, $config);
+        $connectionParams = self::createConnectionParams();
+        $connection = DriverManager::getConnection($connectionParams, $config);
         $entityManager = new EntityManager($connection, $config);
 
         if (DbalType::hasType(PrimaryKey::DOCTRINE_TYPE_NAME)) {
@@ -265,8 +256,15 @@ abstract class TestCase extends PhpUnitTestCase
             DbalType::addType(PrimaryKey::DOCTRINE_TYPE_NAME, $primaryKey::class);
         }
 
+        $metadata = $entityManager->getMetadataFactory()->getAllMetadata();
         $schemaTool = new SchemaTool($entityManager);
-        $schemaTool->createSchema($entityManager->getMetadataFactory()->getAllMetadata());
+
+        // An in-memory SQLite starts empty for every connection; a real server keeps the previous test's tables.
+        if (($connectionParams['memory'] ?? false) !== true) {
+            $schemaTool->dropSchema($metadata);
+        }
+
+        $schemaTool->createSchema($metadata);
 
         $schemaValidator = new SchemaValidator($entityManager);
         $schemaValidator->validateMapping();
@@ -274,9 +272,27 @@ abstract class TestCase extends PhpUnitTestCase
         return $entityManager;
     }
 
-    private function createEntityPreloader(EntityManagerInterface $entityManager): EntityPreloader
+    /**
+     * Defaults to in-memory SQLite. Set PRELOADER_TEST_DB_URL to run the same suite against a real server,
+     * e.g. mysql://root:root@127.0.0.1:3306/preloader or postgresql://postgres:postgres@127.0.0.1:5432/preloader
+     *
+     * @return array<string, mixed>
+     */
+    private static function createConnectionParams(): array
     {
-        return new EntityPreloader($entityManager);
+        $databaseUrl = getenv('PRELOADER_TEST_DB_URL');
+
+        if ($databaseUrl === false || $databaseUrl === '') {
+            return ['driver' => 'pdo_sqlite', 'memory' => true];
+        }
+
+        return (new DsnParser([
+            'sqlite' => 'pdo_sqlite',
+            'mysql' => 'pdo_mysql',
+            'mariadb' => 'pdo_mysql',
+            'postgres' => 'pdo_pgsql',
+            'postgresql' => 'pdo_pgsql',
+        ]))->parse($databaseUrl);
     }
 
     protected function skipIfDoctrineOrmHasBrokenUnhandledMatchCase(): void
@@ -312,8 +328,9 @@ abstract class TestCase extends PhpUnitTestCase
         }
     }
 
-    protected function deduceArrayParameterType(Type $dbalType): ArrayParameterType|int
+    protected function deduceArrayParameterType(DbalType $dbalType): ArrayParameterType|int
     {
+        // ParameterType is an enum on DBAL 4 but int constants on DBAL 3, which no single match arm set fits.
         if ($dbalType->getBindingType() === ParameterType::INTEGER) {
             return ArrayParameterType::INTEGER;
         } elseif ($dbalType->getBindingType() === ParameterType::STRING) {

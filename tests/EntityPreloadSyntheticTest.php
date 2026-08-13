@@ -308,7 +308,6 @@ class EntityPreloadSyntheticTest extends TestCase
     public static function entityWithManyToOneOfManyToOneOfAbstractEntityWithMultipleLevelsOfRelationToItselfDataProvider(): array
     {
         return [
-            // depth 0
             [
                 'levelsOfRelationToItself' => 0,
                 'maxFetchJoinSameFieldCount' => 0,
@@ -330,7 +329,6 @@ class EntityPreloadSyntheticTest extends TestCase
                 'expectedNumberOfQueriesForEntitiesWithRelationToItself' => 4,
             ],
 
-            // depth 1
             [
                 'levelsOfRelationToItself' => 0,
                 'maxFetchJoinSameFieldCount' => 1,
@@ -352,7 +350,6 @@ class EntityPreloadSyntheticTest extends TestCase
                 'expectedNumberOfQueriesForEntitiesWithRelationToItself' => 2,
             ],
 
-            // depth 2
             [
                 'levelsOfRelationToItself' => 0,
                 'maxFetchJoinSameFieldCount' => 2,
@@ -374,7 +371,6 @@ class EntityPreloadSyntheticTest extends TestCase
                 'expectedNumberOfQueriesForEntitiesWithRelationToItself' => 1,
             ],
 
-            // depth 3
             [
                 'levelsOfRelationToItself' => 3,
                 'maxFetchJoinSameFieldCount' => 3,

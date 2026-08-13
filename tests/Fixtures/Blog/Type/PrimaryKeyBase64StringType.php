@@ -14,8 +14,8 @@ use function get_debug_type;
 use function is_string;
 
 /**
- * This type exists only to have SOME working version of tests that are failing due to ORM bug https://github.com/doctrine/orm/pull/12130
- * - the key feature here is that convertToDatabaseValue return value equals to PrimaryKey::__toString()
+ * Covers the tests blocked by https://github.com/doctrine/orm/pull/12130, by making convertToDatabaseValue()
+ * return exactly what PrimaryKey::__toString() does.
  */
 final class PrimaryKeyBase64StringType extends Type
 {
@@ -59,7 +59,8 @@ final class PrimaryKeyBase64StringType extends Type
         AbstractPlatform $platform,
     ): string
     {
-        return $platform->getStringTypeDeclarationSQL([]);
+        // MySQL rejects a VARCHAR without an explicit length; SQLite and PostgreSQL do not care.
+        return $platform->getStringTypeDeclarationSQL(['length' => 32]);
     }
 
     public function getName(): string

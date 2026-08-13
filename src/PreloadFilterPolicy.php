@@ -43,11 +43,6 @@ final class PreloadFilterPolicy
         return $clone;
     }
 
-    public function withoutFilters(string ...$filterNames): self
-    {
-        return $this->disableFilters(...$filterNames);
-    }
-
     public function withFilterParameter(
         string $filterName,
         string $parameterName,

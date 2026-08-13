@@ -116,10 +116,10 @@ class EntityPreloader
             filterPolicy: $this->resolveFilterPolicy($parentFilterPolicy),
         );
         $normalizedPreload = $this->normalizePreloadSpecification($preload);
-        $allLoadedTargets = [];
+        $loadedTargetLists = [];
 
         foreach ($normalizedPreload as $association => $config) {
-            $loadedTargets = $this->preloadConfiguredAssociation(
+            $loadedTargetLists[] = $this->preloadConfiguredAssociation(
                 sourceEntities: $sourceEntities,
                 sourceClassMetadata: $sourceClassMetadata,
                 sourcePropertyName: $association,
@@ -128,13 +128,9 @@ class EntityPreloader
                 maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
                 parentFilterPolicy: $parentFilterPolicy,
             );
-
-            foreach ($loadedTargets as $loadedTarget) {
-                $allLoadedTargets[spl_object_id($loadedTarget)] = $loadedTarget;
-            }
         }
 
-        return array_values($allLoadedTargets);
+        return $this->dedupeEntities(...$loadedTargetLists);
     }
 
     /**
@@ -158,6 +154,7 @@ class EntityPreloader
         }
 
         $sourceClassMetadata = $this->entityManager->getClassMetadata($sourceEntitiesCommonAncestor);
+        $this->assertAssociationIsMapped($sourceClassMetadata, $sourcePropertyName);
         $associationMapping = $sourceClassMetadata->getAssociationMapping($sourcePropertyName);
 
         /** @var ClassMetadata<object> $targetClassMetadata */
@@ -227,6 +224,7 @@ class EntityPreloader
     ): array
     {
         $effectiveFilterPolicy = $this->resolveFilterPolicy($parentFilterPolicy, $preloadConfig->getFilterPolicy());
+        $this->assertAssociationIsMapped($sourceClassMetadata, $sourcePropertyName);
         $associationMapping = $sourceClassMetadata->getAssociationMapping($sourcePropertyName);
         /** @var ClassMetadata<object> $targetClassMetadata */
         $targetClassMetadata = $this->entityManager->getClassMetadata($associationMapping['targetEntity']);
@@ -253,7 +251,7 @@ class EntityPreloader
                 indexByAccessor: $this->getIndexByAccessor($targetClassMetadata, $associationMapping),
             );
 
-            $loadedTargets = $this->flattenGroupedSelectiveResults($grouped);
+            $loadedTargets = $this->dedupeEntities(...array_values($grouped));
 
         } else {
             $loadedTargets = $this->preloadAssociation(
@@ -273,16 +271,17 @@ class EntityPreloader
             return $loadedTargets;
         }
 
-        $nestedOwnerMetadata = $targetClassMetadata;
+        // The declared target class is only an upper bound: with inheritance the loaded targets can be
+        // subclasses carrying associations the declared class does not know about.
+        /** @var ClassMetadata<object> $nestedOwnerMetadata */
+        $nestedOwnerMetadata = $this->entityManager->getClassMetadata(
+            $this->getCommonAncestor($loadedTargets) ?? $targetClassMetadata->getName(),
+        );
         $nestedPreload = $this->normalizePreloadSpecification($preloadConfig->getNestedPreload());
-        $allLoadedTargets = [];
-
-        foreach ($loadedTargets as $loadedTarget) {
-            $allLoadedTargets[spl_object_id($loadedTarget)] = $loadedTarget;
-        }
+        $loadedTargetLists = [$loadedTargets];
 
         foreach ($nestedPreload as $nestedAssociation => $nestedConfig) {
-            $nestedLoadedTargets = $this->preloadConfiguredAssociation(
+            $loadedTargetLists[] = $this->preloadConfiguredAssociation(
                 sourceEntities: $loadedTargets,
                 sourceClassMetadata: $nestedOwnerMetadata,
                 sourcePropertyName: $nestedAssociation,
@@ -291,13 +290,26 @@ class EntityPreloader
                 maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
                 parentFilterPolicy: $effectiveFilterPolicy,
             );
+        }
 
-            foreach ($nestedLoadedTargets as $nestedLoadedTarget) {
-                $allLoadedTargets[spl_object_id($nestedLoadedTarget)] = $nestedLoadedTarget;
+        return $this->dedupeEntities(...$loadedTargetLists);
+    }
+
+    /**
+     * @param list<object> ...$entityLists
+     * @return list<object>
+     */
+    private function dedupeEntities(array ...$entityLists): array
+    {
+        $uniqueEntities = [];
+
+        foreach ($entityLists as $entityList) {
+            foreach ($entityList as $entity) {
+                $uniqueEntities[spl_object_id($entity)] = $entity;
             }
         }
 
-        return array_values($allLoadedTargets);
+        return array_values($uniqueEntities);
     }
 
     private function isSelectiveConfig(PreloadConfig $preloadConfig): bool
@@ -333,8 +345,7 @@ class EntityPreloader
         }
 
         if (($associationMapping['type'] & ClassMetadata::TO_MANY) === 0) {
-            // Writing a filtered result into a to-one association means writing null whenever nothing matched,
-            // which the UnitOfWork sees as a real change and flushes as "UPDATE ... SET fk = NULL".
+            // A non-matching filter would write null, which the UnitOfWork flushes as "UPDATE ... SET fk = NULL".
             throw new UnsupportedAssociationException("Association '{$sourceClassMetadata->getName()}::{$sourcePropertyName}' is to-one and cannot be selectively preloaded.");
         }
 
@@ -342,11 +353,8 @@ class EntityPreloader
         $ownerIdentifierType = $this->getIdentifierFieldType($sourceClassMetadata);
 
         $ownerIdentifierAccessor = $this->getSingleIdPropertyAccessor($sourceClassMetadata);
-        if ($ownerIdentifierAccessor === null) {
-            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
-        }
-
         $ownerIds = [];
+
         foreach ($sourceEntities as $sourceEntity) {
             $ownerIds[] = $ownerIdentifierAccessor->getValue($sourceEntity);
         }
@@ -364,6 +372,7 @@ class EntityPreloader
         }
 
         $batchSize ??= self::PRELOAD_COLLECTION_DEFAULT_BATCH_SIZE;
+        $limitPerParent = $preloadConfig->getLimitPerParent();
         $targetsByOwnerAndObjectId = [];
 
         foreach (array_chunk($ownerIds, $batchSize) as $ownerIdsChunk) {
@@ -374,6 +383,7 @@ class EntityPreloader
                 associationMapping: $associationMapping,
                 ownerIds: $ownerIdsChunk,
                 ownerIdentifierType: $ownerIdentifierType,
+                identifiersOnly: $limitPerParent !== null,
             );
 
             if ($criteria !== null) {
@@ -384,18 +394,44 @@ class EntityPreloader
                 $queryBuilder->addOrderBy("entity.{$field}", $direction);
             }
 
-            $this->addFetchJoinsToPreventFetchDuringHydration('entity', $queryBuilder, $targetClassMetadata, $maxFetchJoinSameFieldCount);
+            if ($limitPerParent === null) {
+                $this->addFetchJoinsToPreventFetchDuringHydration('entity', $queryBuilder, $targetClassMetadata, $maxFetchJoinSameFieldCount);
+            }
 
             if ($preloadConfig->getQueryCustomizer() !== null) {
                 $wrappedBuilder = new PreloadQueryBuilder($queryBuilder);
                 ($preloadConfig->getQueryCustomizer())($wrappedBuilder);
             }
 
-            foreach ($this->executeRowQuery($queryBuilder, $filterPolicy) as $row) {
+            $rows = $this->executeRowQuery($queryBuilder, $filterPolicy);
+
+            foreach ($rows as $row) {
                 if (!array_key_exists('ownerId', $row)) {
                     throw new UnsupportedAssociationException("Unable to determine owner id for selective preload '{$sourcePropertyName}'.");
                 }
+            }
 
+            if ($limitPerParent !== null) {
+                $limitedTargetsByOwner = $this->loadLimitedTargetsPerOwner(
+                    rows: $rows,
+                    targetClassMetadata: $targetClassMetadata,
+                    limitPerParent: $limitPerParent,
+                    maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
+                    filterPolicy: $filterPolicy,
+                );
+
+                foreach ($limitedTargetsByOwner as $ownerKey => $ownerTargets) {
+                    $targetsByOwnerAndObjectId[$ownerKey] ??= [];
+
+                    foreach ($ownerTargets as $ownerTarget) {
+                        $targetsByOwnerAndObjectId[$ownerKey][spl_object_id($ownerTarget)] = $ownerTarget;
+                    }
+                }
+
+                continue;
+            }
+
+            foreach ($rows as $row) {
                 $entity = $row['entity'] ?? $row[0] ?? null;
                 if (!is_object($entity)) {
                     continue;
@@ -407,18 +443,94 @@ class EntityPreloader
             }
         }
 
-        $limitPerParent = $preloadConfig->getLimitPerParent();
         $grouped = [];
 
         foreach ($targetsByOwnerAndObjectId as $ownerKey => $entitiesByObjectId) {
-            $ownerTargets = array_values($entitiesByObjectId);
-
-            // ponytail: every matching row is fetched and the cut happens in PHP, so the limit bounds the
-            // collection, not the query. Move to ROW_NUMBER() OVER (PARTITION BY ...) if row volume hurts.
-            $grouped[$ownerKey] = $limitPerParent === null ? $ownerTargets : array_slice($ownerTargets, 0, $limitPerParent);
+            $grouped[$ownerKey] = array_values($entitiesByObjectId);
         }
 
         return $grouped;
+    }
+
+    /**
+     * Cuts on identifier pairs first, costing one extra query per batch but hydrating only the survivors.
+     *
+     * ponytail: all matching rows still cross the wire as (ownerId, targetId) pairs, only hydration is
+     * bounded. Move to ROW_NUMBER() OVER (PARTITION BY ...) if the transferred row count itself hurts.
+     *
+     * @param list<array<array-key, mixed>> $rows
+     * @param ClassMetadata<object> $targetClassMetadata
+     * @param positive-int $limitPerParent
+     * @param non-negative-int $maxFetchJoinSameFieldCount
+     * @return array<string, list<object>>
+     */
+    private function loadLimitedTargetsPerOwner(
+        array $rows,
+        ClassMetadata $targetClassMetadata,
+        int $limitPerParent,
+        int $maxFetchJoinSameFieldCount,
+        ?PreloadFilterPolicy $filterPolicy,
+    ): array
+    {
+        $targetIdentifierAccessor = $this->getSingleIdPropertyAccessor($targetClassMetadata);
+
+        /** @var array<string, array<string, mixed>> $targetIdsByOwner */
+        $targetIdsByOwner = [];
+
+        foreach ($rows as $row) {
+            if (!array_key_exists('targetId', $row)) {
+                throw new LogicException('Identifier-only selective preload query must select a target id.');
+            }
+
+            $ownerKey = (string) $row['ownerId'];
+            $targetIdsByOwner[$ownerKey] ??= [];
+
+            // Query order is the collection order, and the string key deduplicates rows fanned out by joins.
+            $targetIdsByOwner[$ownerKey][(string) $row['targetId']] ??= $row['targetId'];
+        }
+
+        $targetIdsToLoad = [];
+
+        foreach ($targetIdsByOwner as $ownerKey => $targetIds) {
+            $targetIdsByOwner[$ownerKey] = array_slice($targetIds, 0, $limitPerParent, preserve_keys: true);
+
+            foreach ($targetIdsByOwner[$ownerKey] as $targetIdKey => $targetId) {
+                $targetIdsToLoad[$targetIdKey] = $targetId;
+            }
+        }
+
+        $targetEntitiesById = [];
+
+        foreach (array_chunk($targetIdsToLoad, self::PRELOAD_ENTITY_DEFAULT_BATCH_SIZE) as $targetIdsChunk) {
+            foreach ($this->loadEntitiesBy(
+                $targetClassMetadata,
+                $targetClassMetadata->getSingleIdentifierFieldName(),
+                $targetClassMetadata,
+                $targetIdsChunk,
+                $maxFetchJoinSameFieldCount,
+                filterPolicy: $filterPolicy,
+            ) as $targetEntity) {
+                $targetEntitiesById[(string) $targetIdentifierAccessor->getValue($targetEntity)] = $targetEntity;
+            }
+        }
+
+        $limitedTargetsByOwner = [];
+
+        foreach ($targetIdsByOwner as $ownerKey => $targetIds) {
+            $ownerTargets = [];
+
+            foreach (array_keys($targetIds) as $targetIdKey) {
+                if (!array_key_exists($targetIdKey, $targetEntitiesById)) {
+                    continue;
+                }
+
+                $ownerTargets[] = $targetEntitiesById[$targetIdKey];
+            }
+
+            $limitedTargetsByOwner[$ownerKey] = $ownerTargets;
+        }
+
+        return $limitedTargetsByOwner;
     }
 
     /**
@@ -434,10 +546,15 @@ class EntityPreloader
         array|ArrayAccess $associationMapping,
         array $ownerIds,
         Type $ownerIdentifierType,
+        bool $identifiersOnly = false,
     ): QueryBuilder
     {
+        $targetSelect = $identifiersOnly
+            ? "entity.{$targetClassMetadata->getSingleIdentifierFieldName()} AS targetId"
+            : 'entity';
+
         $queryBuilder = $this->entityManager->createQueryBuilder()
-            ->select("owner.{$sourceClassMetadata->getSingleIdentifierFieldName()} AS ownerId", 'entity')
+            ->select("owner.{$sourceClassMetadata->getSingleIdentifierFieldName()} AS ownerId", $targetSelect)
             ->from($targetClassMetadata->getName(), 'entity');
 
         $ownerRelation = $this->resolveOwnerRelationForSelectiveQuery($sourceClassMetadata, $sourcePropertyName, $associationMapping);
@@ -446,9 +563,8 @@ class EntityPreloader
             $queryBuilder->join("entity.{$ownerRelation}", 'owner');
 
         } else {
-            // Unidirectional owning side: the owner is not reachable from the target, so owners are paired
-            // through a correlated MEMBER OF instead of a join. 'entity' stays the first root, which is what
-            // QueryBuilder::addCriteria() resolves unqualified criteria fields against.
+            // The owner is not reachable from the target, so pair them through a correlated MEMBER OF.
+            // 'entity' must stay the first root: that is what addCriteria() resolves unqualified fields against.
             // ponytail: leans on the planner rewriting the EXISTS into a semi-join. Move to the two-query
             // id-pairing shape used by preloadManyToManyInner() if that ever shows up in a profile.
             $queryBuilder
@@ -493,22 +609,6 @@ class EntityPreloader
     }
 
     /**
-     * @param array<string, list<object>> $groupedResultsByOwnerId
-     * @return list<object>
-     */
-    private function flattenGroupedSelectiveResults(array $groupedResultsByOwnerId): array
-    {
-        $flattened = [];
-        foreach ($groupedResultsByOwnerId as $groupedResult) {
-            foreach ($groupedResult as $targetEntity) {
-                $flattened[spl_object_id($targetEntity)] = $targetEntity;
-            }
-        }
-
-        return array_values($flattened);
-    }
-
-    /**
      * @param list<object> $sourceEntities
      * @param array<string, list<object>> $groupedResultsByOwnerId
      * @param ClassMetadata<object> $sourceClassMetadata
@@ -523,9 +623,6 @@ class EntityPreloader
     ): void
     {
         $sourcePropertyAccessor = $this->getPropertyAccessor($sourceClassMetadata, $sourcePropertyName);
-        if ($sourcePropertyAccessor === null) {
-            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
-        }
 
         foreach ($sourceEntities as $sourceEntity) {
             $ownerKey = $this->normalizeEntityIdentifier($sourceEntity);
@@ -567,8 +664,7 @@ class EntityPreloader
         }
 
         if ($collection->isInitialized()) {
-            // PersistentCollection::clear() schedules a collection deletion (and orphan removal) in the UnitOfWork,
-            // which the takeSnapshot() below does not undo. Empty the backing collection instead.
+            // PersistentCollection::clear() schedules a deletion (and orphan removal) that takeSnapshot() does not undo.
             $collection->unwrap()->clear();
         }
 
@@ -587,12 +683,7 @@ class EntityPreloader
             throw new UnsupportedCompositeIdentifierException('Entity \'' . $entity::class . '\' has composite identifier.');
         }
 
-        $identifierAccessor = $this->getSingleIdPropertyAccessor($entityClassMetadata);
-        if ($identifierAccessor === null) {
-            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
-        }
-
-        return (string) $identifierAccessor->getValue($entity);
+        return (string) $this->getSingleIdPropertyAccessor($entityClassMetadata)->getValue($entity);
     }
 
     /**
@@ -638,12 +729,8 @@ class EntityPreloader
         ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
-        $identifierAccessor = $this->getSingleIdPropertyAccessor($classMetadata); // e.g. Order::$id reflection
-        $identifierName = $classMetadata->getSingleIdentifierFieldName(); // e.g. 'id'
-
-        if ($identifierAccessor === null) {
-            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
-        }
+        $identifierAccessor = $this->getSingleIdPropertyAccessor($classMetadata);
+        $identifierName = $classMetadata->getSingleIdentifierFieldName();
 
         $uniqueEntities = [];
         $uninitializedIds = [];
@@ -683,13 +770,9 @@ class EntityPreloader
         ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
-        $sourceIdentifierAccessor = $this->getSingleIdPropertyAccessor($sourceClassMetadata); // e.g. Order::$id reflection
-        $sourcePropertyAccessor = $this->getPropertyAccessor($sourceClassMetadata, $sourcePropertyName); // e.g. Order::$items reflection
+        $sourceIdentifierAccessor = $this->getSingleIdPropertyAccessor($sourceClassMetadata);
+        $sourcePropertyAccessor = $this->getPropertyAccessor($sourceClassMetadata, $sourcePropertyName);
         $targetIdentifierAccessor = $this->getSingleIdPropertyAccessor($targetClassMetadata);
-
-        if ($sourceIdentifierAccessor === null || $sourcePropertyAccessor === null || $targetIdentifierAccessor === null) {
-            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
-        }
 
         $batchSize ??= self::PRELOAD_COLLECTION_DEFAULT_BATCH_SIZE;
         $targetEntities = [];
@@ -717,6 +800,7 @@ class EntityPreloader
             }
         }
 
+        $this->assertAssociationIsMapped($sourceClassMetadata, $sourcePropertyName);
         $associationMapping = $sourceClassMetadata->getAssociationMapping($sourcePropertyName);
 
         $innerLoader = match ($associationMapping['type']) {
@@ -774,13 +858,9 @@ class EntityPreloader
         ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
-        $targetPropertyName = $sourceClassMetadata->getAssociationMappedByTargetField($sourcePropertyName); // e.g. 'order'
-        $targetPropertyAccessor = $this->getPropertyAccessor($targetClassMetadata, $targetPropertyName); // e.g. Item::$order reflection
+        $targetPropertyName = $sourceClassMetadata->getAssociationMappedByTargetField($sourcePropertyName);
+        $targetPropertyAccessor = $this->getPropertyAccessor($targetClassMetadata, $targetPropertyName);
         $targetEntities = [];
-
-        if ($targetPropertyAccessor === null) {
-            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
-        }
 
         $indexByAccessor = $this->getIndexByAccessor($targetClassMetadata, $associationMapping);
 
@@ -845,8 +925,7 @@ class EntityPreloader
                 $this->deduceArrayParameterType($sourceIdentifierType),
             );
 
-        // Ordering the pair query by the target fields is enough: rows are consumed in query order,
-        // so each source collection ends up filled in that order too.
+        // Rows are consumed in query order, so ordering the pair query fills each collection in that order.
         foreach ($associationMapping['orderBy'] ?? [] as $field => $direction) {
             $manyToManyQueryBuilder->addOrderBy("target.{$field}", $direction);
         }
@@ -903,11 +982,7 @@ class EntityPreloader
         ?PreloadFilterPolicy $filterPolicy = null,
     ): array
     {
-        $sourcePropertyAccessor = $this->getPropertyAccessor($sourceClassMetadata, $sourcePropertyName); // e.g. Item::$order reflection
-
-        if ($sourcePropertyAccessor === null) {
-            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
-        }
+        $sourcePropertyAccessor = $this->getPropertyAccessor($sourceClassMetadata, $sourcePropertyName);
 
         $batchSize ??= self::PRELOAD_ENTITY_DEFAULT_BATCH_SIZE;
         $targetEntities = [];
@@ -1270,13 +1345,7 @@ class EntityPreloader
             throw new UnsupportedIndexedCollectionException("Association indexed by '{$targetClassMetadata->getName()}::\${$indexByFieldName}' cannot be preloaded because it is not a mapped field.");
         }
 
-        $indexByAccessor = $this->getPropertyAccessor($targetClassMetadata, $indexByFieldName);
-
-        if ($indexByAccessor === null) {
-            throw new LogicException('Doctrine should use RuntimeReflectionService which never returns null.');
-        }
-
-        return $indexByAccessor;
+        return $this->getPropertyAccessor($targetClassMetadata, $indexByFieldName);
     }
 
     /**
@@ -1304,15 +1373,34 @@ class EntityPreloader
     }
 
     /**
+     * Doctrine throws its own MappingException for an unmapped property; the package promises its own types.
+     *
      * @param ClassMetadata<object> $classMetadata
      */
-    private function getSingleIdPropertyAccessor(ClassMetadata $classMetadata): PropertyAccessor|ReflectionProperty|null
+    private function assertAssociationIsMapped(
+        ClassMetadata $classMetadata,
+        string $sourcePropertyName,
+    ): void
     {
-        if (method_exists($classMetadata, 'getSingleIdPropertyAccessor')) {
-            return $classMetadata->getSingleIdPropertyAccessor();
+        if ($classMetadata->hasAssociation($sourcePropertyName)) {
+            return;
         }
 
-        return $classMetadata->getSingleIdReflectionProperty();
+        throw new InvalidAssociationException("Association '{$classMetadata->getName()}::\${$sourcePropertyName}' is not mapped.");
+    }
+
+    /**
+     * Doctrine resolves every mapped property through RuntimeReflectionService, which never returns null.
+     *
+     * @param ClassMetadata<object> $classMetadata
+     */
+    private function getSingleIdPropertyAccessor(ClassMetadata $classMetadata): PropertyAccessor|ReflectionProperty
+    {
+        $accessor = method_exists($classMetadata, 'getSingleIdPropertyAccessor')
+            ? $classMetadata->getSingleIdPropertyAccessor()
+            : $classMetadata->getSingleIdReflectionProperty();
+
+        return $accessor ?? throw new LogicException("Identifier of '{$classMetadata->getName()}' is not accessible.");
     }
 
     /**
@@ -1321,13 +1409,13 @@ class EntityPreloader
     private function getPropertyAccessor(
         ClassMetadata $classMetadata,
         string $property,
-    ): PropertyAccessor|ReflectionProperty|null
+    ): PropertyAccessor|ReflectionProperty
     {
-        if (method_exists($classMetadata, 'getPropertyAccessor')) {
-            return $classMetadata->getPropertyAccessor($property);
-        }
+        $accessor = method_exists($classMetadata, 'getPropertyAccessor')
+            ? $classMetadata->getPropertyAccessor($property)
+            : $classMetadata->getReflectionProperty($property);
 
-        return $classMetadata->getReflectionProperty($property);
+        return $accessor ?? throw new LogicException("Property '{$classMetadata->getName()}::\${$property}' is not accessible.");
     }
 
 }

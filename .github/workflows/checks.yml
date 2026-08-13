@@ -54,3 +54,55 @@ jobs:
             -
                 name: Run tests
                 run: composer check:tests
+
+    tests-databases:
+        name: tests (${{ matrix.database }}, doctrine ${{ matrix.doctrine-version }})
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                database: [ mysql, postgres ]
+                doctrine-version: [ '^2.19', '^3' ]
+        services:
+            mysql:
+                image: mysql:8
+                env:
+                    MYSQL_ROOT_PASSWORD: root
+                    MYSQL_DATABASE: preloader
+                ports:
+                    - 3306:3306
+                options: >-
+                    --health-cmd="mysqladmin ping -uroot -proot"
+                    --health-interval=10s
+                    --health-timeout=5s
+                    --health-retries=10
+            postgres:
+                image: postgres:16
+                env:
+                    POSTGRES_PASSWORD: postgres
+                    POSTGRES_DB: preloader
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd=pg_isready
+                    --health-interval=10s
+                    --health-timeout=5s
+                    --health-retries=10
+        steps:
+            -
+                name: Checkout code
+                uses: actions/checkout@v6
+            -
+                name: Setup PHP
+                uses: shivammathur/setup-php@v2
+                with:
+                    php-version: 8.3
+                    extensions: pdo_mysql, pdo_pgsql
+            -
+                name: Install dependencies
+                run: composer update --no-progress --prefer-dist --no-interaction --with-all-dependencies doctrine/orm:${{ matrix.doctrine-version }} symfony/cache
+            -
+                name: Run tests
+                env:
+                    PRELOADER_TEST_DB_URL: ${{ matrix.database == 'mysql' && 'mysql://root:root@127.0.0.1:3306/preloader?serverVersion=8.0' || 'postgresql://postgres:postgres@127.0.0.1:5432/preloader' }}
+                run: composer check:tests

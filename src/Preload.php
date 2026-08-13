@@ -49,11 +49,6 @@ final class Preload
         return self::association()->disableFilters(...$filterNames);
     }
 
-    public static function withoutFilters(string ...$filterNames): PreloadConfig
-    {
-        return self::association()->withoutFilters(...$filterNames);
-    }
-
     public static function withFilterParameter(
         string $filterName,
         string $parameterName,

@@ -122,10 +122,8 @@ final class EntityPreloaderRuleTestData
     {
         $employees = $this->entityManager->getRepository(Employee::class)->findAll();
 
-        // ManyToOne WITHOUT targetEntity attribute
         assertType('list<KyzegsTests\DoctrineEntityPreloader\Fixtures\Issue37\Employee>', $this->entityPreloader->preload($employees, 'supervisor'));
 
-        // OneToOne WITHOUT targetEntity attribute
         assertType('list<KyzegsTests\DoctrineEntityPreloader\Fixtures\Issue37\EmployeeSettings>', $this->entityPreloader->preload($employees, 'settings'));
     }
 

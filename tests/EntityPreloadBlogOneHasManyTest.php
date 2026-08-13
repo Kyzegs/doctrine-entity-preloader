@@ -34,12 +34,20 @@ class EntityPreloadBlogOneHasManyTest extends TestCase
         $this->createDummyBlogData($primaryKey, categoryCount: 5, articleInEachCategoryCount: 5);
 
         $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+        $platform = $this->getEntityManager()->getConnection()->getDatabasePlatform();
+
+        // Binding the entities themselves makes Doctrine string-cast the custom identifier, which strict
+        // platforms reject. A manual preload has to convert and bind the identifiers itself.
+        $rawCategoryIds = array_map(
+            static fn (Category $category) => $primaryKey->convertToDatabaseValue($category->getId(), $platform),
+            $categories,
+        );
 
         $this->getEntityManager()->createQueryBuilder()
             ->select('article')
             ->from(Article::class, 'article')
             ->where('article.category IN (:categories)')
-            ->setParameter('categories', $categories)
+            ->setParameter('categories', $rawCategoryIds, $this->deduceArrayParameterType($primaryKey))
             ->getQuery()
             ->getResult();
 

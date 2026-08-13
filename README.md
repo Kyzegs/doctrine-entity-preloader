@@ -167,7 +167,7 @@ $entityPreloader->preload($articles, [
 ]);
 ```
 
-`limitPerParent()` is the per-parent counterpart of `Criteria::setMaxResults()`, which is a single global limit and therefore rejected. All matching rows are still fetched; the cut happens while the collections are hydrated. Use it to bound collection size, not query size.
+`limitPerParent()` is the per-parent counterpart of `Criteria::setMaxResults()`, which is a single global limit and therefore rejected. Matching rows are ranked on identifier pairs, so only the targets that survive the limit are hydrated as entities. It bounds hydration, not the number of rows the database has to scan.
 
 Nested customized preload:
 
@@ -199,6 +199,7 @@ Additional rules:
 - Indexed associations (`indexBy`) are preloaded with their collection keys intact, as long as `indexBy` names a mapped field.
 - Selective preload of a to-one association is rejected. A non-matching filter would assign `null` to the association, which Doctrine flushes as `UPDATE ... SET fk = NULL`.
 - Root query stays unchanged; relation rows are loaded in separate preload queries, batched by `batchSize` (100 owners per query by default).
+- `limitPerParent()` costs two queries per batch: one for the `(owner, target)` identifier pairs and one loading the targets that survived the limit.
 
 ## Configuration
 
@@ -232,7 +233,7 @@ use Kyzegs\DoctrineEntityPreloader\PreloadFilterPolicy;
 
 $preloader = new EntityPreloader(
     $entityManager,
-    PreloadFilterPolicy::create()->withoutFilters('softdeleteable'),
+    PreloadFilterPolicy::create()->disableFilters('softdeleteable'),
 );
 ```
 
@@ -244,7 +245,7 @@ use Kyzegs\DoctrineEntityPreloader\PreloadFilterPolicy;
 
 $preloader = new EntityPreloader(
     $entityManager,
-    PreloadFilterPolicy::create()->withoutFilters('softdeleteable'),
+    PreloadFilterPolicy::create()->disableFilters('softdeleteable'),
 );
 
 $preloader->preload($categories, [
@@ -268,8 +269,17 @@ Factory helpers are also available:
 
 ```php
 Preload::enableFilters('softdeleteable');
-Preload::withoutFilters('softdeleteable');
+Preload::disableFilters('softdeleteable');
 Preload::withFilterParameter('softdeleteable', 'deletedValue', 0);
+```
+
+
+## Supported databases
+
+The test suite runs against SQLite, MySQL 8 and PostgreSQL 16. To run it locally against a real server, point `PRELOADER_TEST_DB_URL` at it:
+
+```sh
+PRELOADER_TEST_DB_URL='postgresql://postgres:postgres@127.0.0.1:5432/preloader' composer check:tests
 ```
 
 

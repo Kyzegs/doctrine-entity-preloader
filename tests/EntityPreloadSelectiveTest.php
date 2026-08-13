@@ -206,6 +206,25 @@ class EntityPreloadSelectiveTest extends TestCase
         }
     }
 
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testLimitPerParentHydratesOnlySurvivingTargets(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 2, articleInEachCategoryCount: 4);
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+        $this->getQueryLogger()->clear();
+
+        $this->getEntityPreloader()->preload($categories, [
+            'articles' => Preload::limitPerParent(1),
+        ]);
+
+        // 8 articles match, 2 survive the limit, and only those 2 are hydrated.
+        $identityMap = $this->getEntityManager()->getUnitOfWork()->getIdentityMap();
+        self::assertCount(2, $identityMap[Article::class] ?? []);
+
+        // One identifier-pair query, then one query loading only the targets that survived the limit.
+        self::assertCount(2, $this->getQueryLogger()->getQueries());
+    }
+
     public function testLimitPerParentRejectsNonPositiveLimit(): void
     {
         self::assertException(

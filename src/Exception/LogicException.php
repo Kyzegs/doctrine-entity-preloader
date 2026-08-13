@@ -16,9 +16,4 @@ class LogicException extends NativeLogicException
         parent::__construct($message, 0, $previous);
     }
 
-    public static function fromException(Throwable $e): self
-    {
-        return new self($e->getMessage(), $e);
-    }
-
 }

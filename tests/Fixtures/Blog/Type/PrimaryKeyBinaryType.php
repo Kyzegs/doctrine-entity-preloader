@@ -9,8 +9,10 @@ use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\PrimaryKey;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Compat\CompatibilityType;
 use LogicException;
 use function get_debug_type;
+use function is_resource;
 use function is_string;
 use function pack;
+use function stream_get_contents;
 use function unpack;
 
 final class PrimaryKeyBinaryType extends Type
@@ -27,8 +29,11 @@ final class PrimaryKeyBinaryType extends Type
             return null;
         }
 
-        if (is_string($value)) {
-            return new PrimaryKey(unpack('N', $value)[1]); // @phpstan-ignore offsetAccess.nonOffsetAccessible
+        // PostgreSQL returns BYTEA columns as a stream.
+        $binary = is_resource($value) ? stream_get_contents($value) : $value;
+
+        if (is_string($binary)) {
+            return new PrimaryKey(unpack('N', $binary)[1]); // @phpstan-ignore offsetAccess.nonOffsetAccessible
         }
 
         throw new LogicException('Unexpected value: ' . get_debug_type($value));

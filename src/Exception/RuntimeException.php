@@ -16,9 +16,4 @@ abstract class RuntimeException extends NativeRuntimeException
         parent::__construct($message, 0, $previous);
     }
 
-    public function toLogicException(?string $message = null): LogicException
-    {
-        return new LogicException($message ?? $this->getMessage(), $this);
-    }
-
 }

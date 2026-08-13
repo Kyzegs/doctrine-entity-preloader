@@ -3,6 +3,7 @@
 namespace KyzegsTests\DoctrineEntityPreloader;
 
 use Doctrine\DBAL\Types\Type as DbalType;
+use Kyzegs\DoctrineEntityPreloader\Exception\InvalidAssociationException;
 use Kyzegs\DoctrineEntityPreloader\Exception\LogicException;
 use Kyzegs\DoctrineEntityPreloader\Preload;
 use Kyzegs\DoctrineEntityPreloader\PreloadQueryBuilder;
@@ -50,7 +51,9 @@ class EntityPreloadExceptionContractTest extends TestCase
     {
         $this->createDummyBlogData($primaryKey, categoryCount: 1, articleInEachCategoryCount: 3);
         $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
-        $wantedArticleId = $this->getEntityManager()->getRepository(Article::class)->findAll()[1]->getId();
+        // findAll() has no ORDER BY, so pick the article by identity rather than by position.
+        $wantedArticle = $this->getEntityManager()->getRepository(Article::class)->findAll()[1];
+        $wantedArticleId = $wantedArticle->getId();
 
         $this->getEntityPreloader()->preload($categories, [
             'articles' => Preload::query(
@@ -64,7 +67,22 @@ class EntityPreloadExceptionContractTest extends TestCase
 
         $preloadedArticles = iterator_to_array($categories[0]->getArticles(), false);
         self::assertCount(1, $preloadedArticles);
-        self::assertSame('Article#1', $preloadedArticles[0]->getTitle());
+        self::assertSame($wantedArticle->getTitle(), $preloadedArticles[0]->getTitle());
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testUnmappedAssociationThrowsPackageLogicException(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 1, articleInEachCategoryCount: 1);
+        $categories = $this->getEntityManager()->getRepository(Category::class)->findAll();
+
+        self::assertException(
+            InvalidAssociationException::class,
+            "Association 'KyzegsTests\\DoctrineEntityPreloader\\Fixtures\\Blog\\Category::\$notAnAssociation' is not mapped.",
+            function () use ($categories): void {
+                $this->getEntityPreloader()->preload($categories, 'notAnAssociation'); // @phpstan-ignore kyzegs.entityPreloader (deliberately unmapped)
+            },
+        );
     }
 
 }

@@ -10,6 +10,7 @@ use KyzegsTests\DoctrineEntityPreloader\Lib\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use function count;
 use function iterator_to_array;
+use function sort;
 
 class EntityPreloadMixedIdentifierTest extends TestCase
 {
@@ -37,6 +38,9 @@ class EntityPreloadMixedIdentifierTest extends TestCase
                 self::assertInstanceOf(Tag::class, $tag);
                 $labels[] = $tag->getLabel();
             }
+
+            // Bookmark::$tags has no orderBy, so row order is up to the platform - only the label set matters.
+            sort($labels);
 
             self::assertSame(['Tag#0', 'Tag#1'], $labels);
         }

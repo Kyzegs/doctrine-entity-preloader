@@ -53,7 +53,8 @@ final class PrimaryKeyStringType extends Type
         AbstractPlatform $platform,
     ): string
     {
-        return $platform->getStringTypeDeclarationSQL([]);
+        // MySQL rejects a VARCHAR without an explicit length; SQLite and PostgreSQL do not care.
+        return $platform->getStringTypeDeclarationSQL(['length' => 32]);
     }
 
     public function getName(): string

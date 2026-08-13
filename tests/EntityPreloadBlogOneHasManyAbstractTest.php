@@ -4,7 +4,9 @@ namespace KyzegsTests\DoctrineEntityPreloader;
 
 use Doctrine\DBAL\Types\Type as DbalType;
 use Doctrine\ORM\Mapping\ClassMetadata;
+use Kyzegs\DoctrineEntityPreloader\Preload;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Article;
+use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Bot;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Comment;
 use KyzegsTests\DoctrineEntityPreloader\Lib\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -86,6 +88,52 @@ class EntityPreloadBlogOneHasManyAbstractTest extends TestCase
             ['count' => 1, 'query' => 'SELECT * FROM article t0'],
             ['count' => 1, 'query' => 'SELECT * FROM comment c0_ LEFT JOIN contributor c1_ ON c0_.author_id = c1_.id AND c1_.dtype IN (?) WHERE c0_.article_id IN (?, ?, ?, ?, ?) ORDER BY c0_.id DESC'],
         ]);
+    }
+
+    #[DataProvider('providePrimaryKeyTypes')]
+    public function testNestedPreloadResolvesAssociationDeclaredOnSubclass(DbalType $primaryKey): void
+    {
+        $this->createDummyBlogData($primaryKey, categoryCount: 1, articleInEachCategoryCount: 2, commentForEachArticleCount: 2);
+
+        $botComments = $this->loadBotComments();
+        self::assertNotSame([], $botComments);
+
+        // The declared target of Comment::$author is the abstract Contributor, which has no 'activePrompt'.
+        $this->getEntityPreloader()->preload($botComments, [
+            'author' => Preload::association()->preload(['activePrompt']),
+        ]);
+
+        foreach ($botComments as $botComment) {
+            $author = $botComment->getAuthor();
+            self::assertInstanceOf(Bot::class, $author);
+            self::assertFalse($this->getEntityManager()->isUninitializedObject($author->getActivePrompt()));
+        }
+    }
+
+    /**
+     * @return list<Comment>
+     */
+    private function loadBotComments(): array
+    {
+        $comments = $this->getEntityManager()->createQueryBuilder()
+            ->select('comment')
+            ->from(Comment::class, 'comment')
+            ->getQuery()
+            ->getResult();
+
+        $botComments = [];
+
+        foreach ($comments as $comment) {
+            if (!$comment instanceof Comment) {
+                continue;
+            }
+
+            if ($comment->getAuthor() instanceof Bot) {
+                $botComments[] = $comment;
+            }
+        }
+
+        return $botComments;
     }
 
     /**

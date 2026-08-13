@@ -16,7 +16,6 @@ use Doctrine\ORM\Mapping\UnderscoreNamingStrategy;
 use Doctrine\ORM\ORMSetup;
 use Doctrine\ORM\Tools\SchemaTool;
 use Doctrine\ORM\Tools\SchemaValidator;
-use Doctrine\ORM\UnitOfWork;
 use Kyzegs\DoctrineEntityPreloader\EntityPreloader;
 use Kyzegs\DoctrineEntityPreloader\Exception\LogicException;
 use KyzegsTests\DoctrineEntityPreloader\Fixtures\Blog\Article;
@@ -184,7 +183,9 @@ abstract class TestCase extends PhpUnitTestCase
      */
     protected function refreshEntity(object $entity): ?object
     {
-        if ($this->getEntityManager()->getUnitOfWork()->getEntityState($entity) === UnitOfWork::STATE_MANAGED) {
+        // contains() answers from the identity map. getEntityState() falls back to a "SELECT 1" existence
+        // probe whenever the identifier generator is not post-insert, which pollutes the asserted query log.
+        if ($this->getEntityManager()->contains($entity)) {
             throw new LogicException('Call $this->getEntityManager()->clear() before refreshing entity!');
         }
 
@@ -246,8 +247,19 @@ abstract class TestCase extends PhpUnitTestCase
         $config->setNamingStrategy(new UnderscoreNamingStrategy());
         $config->setMiddlewares([new Middleware($logger)]);
 
-        $connectionParams = self::createConnectionParams();
-        $connection = DriverManager::getConnection($connectionParams, $config);
+        $databaseUrl = self::getDatabaseUrl();
+        $connection = DriverManager::getConnection(
+            $databaseUrl === null
+                ? ['driver' => 'pdo_sqlite', 'memory' => true]
+                : (new DsnParser([
+                    'sqlite' => 'pdo_sqlite',
+                    'mysql' => 'pdo_mysql',
+                    'mariadb' => 'pdo_mysql',
+                    'postgres' => 'pdo_pgsql',
+                    'postgresql' => 'pdo_pgsql',
+                ]))->parse($databaseUrl),
+            $config,
+        );
         $entityManager = new EntityManager($connection, $config);
 
         if (DbalType::hasType(PrimaryKey::DOCTRINE_TYPE_NAME)) {
@@ -260,8 +272,10 @@ abstract class TestCase extends PhpUnitTestCase
         $schemaTool = new SchemaTool($entityManager);
 
         // An in-memory SQLite starts empty for every connection; a real server keeps the previous test's tables.
-        if (($connectionParams['memory'] ?? false) !== true) {
-            $schemaTool->dropSchema($metadata);
+        // dropDatabase() introspects what is really there, so it also clears names the server truncated
+        // (PostgreSQL cuts identifiers at 63 bytes) and which dropSchema() would look for under their full name.
+        if ($databaseUrl !== null) {
+            $schemaTool->dropDatabase();
         }
 
         $schemaTool->createSchema($metadata);
@@ -273,26 +287,18 @@ abstract class TestCase extends PhpUnitTestCase
     }
 
     /**
-     * Defaults to in-memory SQLite. Set PRELOADER_TEST_DB_URL to run the same suite against a real server,
+     * Null runs the suite on in-memory SQLite. Set PRELOADER_TEST_DB_URL to use a real server instead,
      * e.g. mysql://root:root@127.0.0.1:3306/preloader or postgresql://postgres:postgres@127.0.0.1:5432/preloader
-     *
-     * @return array<string, mixed>
      */
-    private static function createConnectionParams(): array
+    private static function getDatabaseUrl(): ?string
     {
         $databaseUrl = getenv('PRELOADER_TEST_DB_URL');
 
         if ($databaseUrl === false || $databaseUrl === '') {
-            return ['driver' => 'pdo_sqlite', 'memory' => true];
+            return null;
         }
 
-        return (new DsnParser([
-            'sqlite' => 'pdo_sqlite',
-            'mysql' => 'pdo_mysql',
-            'mariadb' => 'pdo_mysql',
-            'postgres' => 'pdo_pgsql',
-            'postgresql' => 'pdo_pgsql',
-        ]))->parse($databaseUrl);
+        return $databaseUrl;
     }
 
     protected function skipIfDoctrineOrmHasBrokenUnhandledMatchCase(): void

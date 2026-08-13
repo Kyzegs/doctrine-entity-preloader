@@ -100,9 +100,13 @@ jobs:
                     extensions: pdo_mysql, pdo_pgsql
             -
                 name: Install dependencies
+                run: composer update --no-progress --prefer-dist --no-interaction
+            -
+                name: Install correct version of Doctrine
                 run: composer update --no-progress --prefer-dist --no-interaction --with-all-dependencies doctrine/orm:${{ matrix.doctrine-version }} symfony/cache
             -
                 name: Run tests
                 env:
-                    PRELOADER_TEST_DB_URL: ${{ matrix.database == 'mysql' && 'mysql://root:root@127.0.0.1:3306/preloader?serverVersion=8.0' || 'postgresql://postgres:postgres@127.0.0.1:5432/preloader' }}
+                    # No serverVersion: version_compare('8.0', '8.0.0') is -1, which would pick the pre-8.0 platform.
+                    PRELOADER_TEST_DB_URL: ${{ matrix.database == 'mysql' && 'mysql://root:root@127.0.0.1:3306/preloader' || 'postgresql://postgres:postgres@127.0.0.1:5432/preloader' }}
                 run: composer check:tests

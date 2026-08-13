@@ -154,6 +154,21 @@ $entityPreloader->preload($merchants, [
 ]);
 ```
 
+Keeping only the first N targets per owner:
+
+```php
+use Doctrine\Common\Collections\Criteria;
+use Kyzegs\DoctrineEntityPreloader\Preload;
+
+$entityPreloader->preload($articles, [
+    'comments' => Preload::criteria(
+        Criteria::create()->orderBy(['createdAt' => Criteria::DESC])
+    )->limitPerParent(3),
+]);
+```
+
+`limitPerParent()` is the per-parent counterpart of `Criteria::setMaxResults()`, which is a single global limit and therefore rejected. All matching rows are still fetched; the cut happens while the collections are hydrated. Use it to bound collection size, not query size.
+
 Nested customized preload:
 
 ```php
@@ -178,8 +193,9 @@ Additional rules:
 
 - Dirty collections are rejected with `DirtyCollectionException`.
 - Already initialized collections are rejected by default for selective preload. Use `replaceInitializedCollection()` explicitly if overwrite is intended.
-- `Criteria::setMaxResults()` is rejected for to-many selective preloads because it is global child limit, not per-parent limit.
+- `Criteria::setMaxResults()` is rejected for to-many selective preloads because it is global child limit, not per-parent limit. Use `limitPerParent()` instead.
 - `Criteria::setFirstResult()` is rejected for the same reason: it is a global offset, not a per-parent offset.
+- Unidirectional to-many associations are supported. Owners that are not reachable from the target entity are matched with a correlated `MEMBER OF` instead of a join, so the query plan is a little weaker than for bidirectional associations.
 - Indexed associations (`indexBy`) are preloaded with their collection keys intact, as long as `indexBy` names a mapped field.
 - Selective preload of a to-one association is rejected. A non-matching filter would assign `null` to the association, which Doctrine flushes as `UPDATE ... SET fk = NULL`.
 - Root query stays unchanged; relation rows are loaded in separate preload queries, batched by `batchSize` (100 owners per query by default).

@@ -4,6 +4,7 @@ namespace Kyzegs\DoctrineEntityPreloader;
 
 use Closure;
 use Doctrine\Common\Collections\Criteria;
+use Kyzegs\DoctrineEntityPreloader\Exception\LogicException;
 
 final class PreloadConfig
 {
@@ -11,6 +12,7 @@ final class PreloadConfig
     /**
      * @param array<int|string, string|PreloadConfig> $nestedPreload
      * @param (callable(PreloadQueryBuilder): void)|null $queryCustomizer
+     * @param positive-int|null $limitPerParent
      */
     public function __construct(
         private ?Criteria $criteria = null,
@@ -18,6 +20,7 @@ final class PreloadConfig
         private array $nestedPreload = [],
         private bool $replaceInitializedCollection = false,
         private ?PreloadFilterPolicy $filterPolicy = null,
+        private ?int $limitPerParent = null,
     )
     {
     }
@@ -46,6 +49,21 @@ final class PreloadConfig
     {
         $clone = clone $this;
         $clone->nestedPreload = $preload;
+        return $clone;
+    }
+
+    /**
+     * Keeps at most $limit targets per owner collection. Unlike Criteria::setMaxResults(), which is a
+     * global row limit, this is applied per owner - but all matching rows are still fetched.
+     */
+    public function limitPerParent(int $limit): self
+    {
+        if ($limit < 1) {
+            throw new LogicException('Preload limit per parent must be at least 1.');
+        }
+
+        $clone = clone $this;
+        $clone->limitPerParent = $limit;
         return $clone;
     }
 
@@ -109,6 +127,14 @@ final class PreloadConfig
     public function getNestedPreload(): array
     {
         return $this->nestedPreload;
+    }
+
+    /**
+     * @return positive-int|null
+     */
+    public function getLimitPerParent(): ?int
+    {
+        return $this->limitPerParent;
     }
 
     public function shouldReplaceInitializedCollection(): bool
